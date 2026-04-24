@@ -60,7 +60,18 @@ except ImportError:
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SKINS_DIR = os.path.join(SCRIPT_DIR, "skins")
-SD_CARD = "D:\\"
+
+# ── SD card drive detection ──
+# Checks D:\ then F:\ and uses whichever is present; falls back to D:\.
+SD_CANDIDATES = ["D:\\", "F:\\"]
+
+def _detect_sd_drive():
+    for c in SD_CANDIDATES:
+        if os.path.exists(c):
+            return c
+    return SD_CANDIDATES[0]
+
+SD_CARD = _detect_sd_drive()
 ARCROPOLIS_MODS = os.path.join(SD_CARD, "ultimate", "mods")
 
 SMASH_TITLE_ID = "01006A800016E000"
@@ -85,6 +96,22 @@ PAYLOAD_SEARCH_PATHS = [
     os.path.join(SCRIPT_DIR, "payloads", "hekate_latest.bin"),
     os.path.join(SD_CARD, "atmosphere", "reboot_payload.bin"),
 ]
+
+def _apply_sd_drive(drive):
+    """Update all SD-card-derived module globals when the active drive changes."""
+    global SD_CARD, ARCROPOLIS_MODS, ATMOSPHERE_CONTENTS, PLUGINS_DIR, EXEFS_DIR, ROMFS_DIR
+    SD_CARD = drive
+    ARCROPOLIS_MODS = os.path.join(drive, "ultimate", "mods")
+    ATMOSPHERE_CONTENTS = os.path.join(drive, "atmosphere", "contents", SMASH_TITLE_ID)
+    PLUGINS_DIR = os.path.join(ATMOSPHERE_CONTENTS, "romfs", "skyline", "plugins")
+    EXEFS_DIR = os.path.join(ATMOSPHERE_CONTENTS, "exefs")
+    ROMFS_DIR = os.path.join(ATMOSPHERE_CONTENTS, "romfs")
+    PAYLOAD_SEARCH_PATHS[:] = [
+        os.path.join(drive, "bootloader", "payloads", "fusee.bin"),
+        os.path.join(SCRIPT_DIR, "payloads", "fusee.bin"),
+        os.path.join(SCRIPT_DIR, "payloads", "hekate_latest.bin"),
+        os.path.join(drive, "atmosphere", "reboot_payload.bin"),
+    ]
 
 # Local copies of plugin .nro files (bundled with this repo)
 LOCAL_PLUGINS = {
@@ -452,6 +479,14 @@ def get_occupied_slots(fighter_internal):
                     display_name = meta.get("name", mod_name)
                 except Exception:
                     pass
+            mod_id_val = None
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as _f:
+                        _m = json.load(_f)
+                    mod_id_val = _m.get("mod_id")
+                except Exception:
+                    pass
             for slot in os.listdir(body_path):
                 if os.path.isdir(os.path.join(body_path, slot)) and \
                    re.match(r'^c\d{2}$', slot):
@@ -459,6 +494,7 @@ def get_occupied_slots(fighter_internal):
                         "mod": mod_name,
                         "name": display_name,
                         "thumb_url": thumb_url,
+                        "mod_id": mod_id_val,
                     }
     return occupied
 
@@ -1616,10 +1652,25 @@ def add_mod_to_profile(profile_name, mod_entry):
             "mod_count": 0,
             "mods": [],
         }
-    # Avoid duplicates by mod_id
+    # Avoid duplicates by mod_id — but merge slots if the same mod is added again
     mid = mod_entry.get("mod_id")
+    new_slot = str(mod_entry.get("slot", "")).strip().lower()
     if mid:
-        profile["mods"] = [m for m in profile["mods"] if m.get("mod_id") != mid]
+        existing = next((m for m in profile["mods"] if m.get("mod_id") == mid), None)
+        if existing:
+            if new_slot:
+                # Merge new slot into existing entry
+                cur_slots = set(
+                    s.strip() for s in
+                    str(existing.get("slot", "")).replace(",", " ").split()
+                    if re.match(r"^c\d{2}$", s.strip())
+                )
+                cur_slots.add(new_slot)
+                existing["slot"] = ", ".join(sorted(cur_slots))
+            profile["mod_count"] = len(profile["mods"])
+            profiles[profile_name] = profile
+            save_profiles(profiles)
+            return profile["mod_count"]
     profile["mods"].append(mod_entry)
     profile["mod_count"] = len(profile["mods"])
     profiles[profile_name] = profile
@@ -2070,6 +2121,10 @@ class GameBananaBrowser:
         self._use_unofficial_atmo = True  # prefer unofficial/pre-release Atmosphere
         self._gallery_win = None       # reusable image gallery Toplevel
         self._fav_filter = "All"       # "All", "Skins Only", "Stages Only"
+        self._profile_mode = False     # True to add mods to profile instead of SD
+        self._profile_mode_target = None  # which profile to add to in profile mode
+        self._slot_picker_registry = []   # [(btn, fighter_int, slot, card_mod_id), ...]
+        self._slot_counter_registry = []  # [(label_widget, card_mod_id), ...]
 
         self._build_ui()
         self._redirect_output()
@@ -2256,6 +2311,40 @@ class GameBananaBrowser:
             self._tab_buttons[tab_name] = btn
 
         self._highlight_active_tab()
+
+        # ── Profile Mode control bar ──
+        profile_mode_bar = tk.Frame(self.root, bg=T.SURFACE, pady=4, padx=10)
+        profile_mode_bar.pack(fill="x", padx=12, pady=(0, 0))
+
+        tk.Label(profile_mode_bar, text="Profile Mode:", bg=T.SURFACE, fg=T.FG,
+                 font=(T.FONT, T.SZ_MD)).pack(side="left", padx=(0, 8))
+
+        self._profile_mode_var = tk.BooleanVar(value=False)
+        profile_mode_check = tk.Checkbutton(
+            profile_mode_bar, text="Add to Profile Instead of SD",
+            variable=self._profile_mode_var,
+            command=self._on_profile_mode_toggle,
+            bg=T.SURFACE, fg=T.FG, selectcolor=T.SURFACE,
+            font=(T.FONT, T.SZ_MD), activebackground=T.SURFACE, activeforeground=T.ACCENT)
+        profile_mode_check.pack(side="left", padx=(0, 12))
+
+        tk.Label(profile_mode_bar, text="Profile:", bg=T.SURFACE, fg=T.FG,
+                 font=(T.FONT, T.SZ_MD)).pack(side="left", padx=(0, 4))
+
+        self._profile_list_var = tk.StringVar()
+        self._profile_combo = ttk.Combobox(
+            profile_mode_bar, textvariable=self._profile_list_var,
+            values=[], state="readonly", width=20,
+            font=(T.FONT, T.SZ_MD))
+        self._profile_combo.pack(side="left", padx=(0, 4))
+        self._profile_combo.configure(state="disabled")  # disabled until profile mode on
+        self._profile_combo.bind("<<ComboboxSelected>>", self._on_profile_mode_profile_change)
+
+        # Refresh profile list button
+        tk.Button(profile_mode_bar, text="Refresh", width=8,
+                  bg=T.SURFACE1, fg=T.FG, font=(T.FONT, T.SZ_SM),
+                  relief="flat", cursor="hand2",
+                  command=self._refresh_profile_list).pack(side="left")
 
         # ── Main body: results (left) + log (right) ──
         body = tk.PanedWindow(self.root, orient="horizontal", bg=T.BG,
@@ -2539,6 +2628,152 @@ class GameBananaBrowser:
             if self.fighter_var.get() not in FIGHTER_CATEGORIES:
                 self.fighter_var.set("All Skins")
 
+    def _on_profile_mode_toggle(self):
+        """Toggle profile mode on/off."""
+        self._profile_mode = self._profile_mode_var.get()
+        if self._profile_mode:
+            # Enable profile mode — load profile list
+            self._refresh_profile_list()
+            self._profile_combo.configure(state="readonly")
+        else:
+            # Disable profile mode
+            self._profile_combo.configure(state="disabled")
+            self._profile_combo.set("")
+            self._profile_mode_target = None
+            self._recolor_all_slot_pickers()
+
+    def _refresh_profile_list(self):
+        """Load available profiles into the profile combo."""
+        profiles = load_profiles()
+        profile_names = sorted(profiles.keys())
+        self._profile_combo.configure(values=profile_names)
+        if profile_names:
+            # Auto-select first profile if not already selected
+            current = self._profile_list_var.get()
+            if current not in profile_names:
+                self._profile_list_var.set(profile_names[0])
+            self._profile_mode_target = self._profile_list_var.get()
+            self._recolor_all_slot_pickers()
+        else:
+            self._profile_list_var.set("")
+            self._profile_mode_target = None
+            messagebox.showwarning("No Profiles", "No profiles found. Create a profile first.")
+
+    def _on_profile_mode_profile_change(self, _event=None):
+        """Update active profile mode target and recolor visible slot pickers."""
+        self._profile_mode_target = self._profile_list_var.get() or None
+        self._recolor_all_slot_pickers()
+
+    def _get_profile_occupied_slots(self, profile_name, fighter_int):
+        """Return occupied cXX slots for a fighter from a saved profile."""
+        occupied = {}
+        if not profile_name or not fighter_int:
+            return occupied
+
+        profiles = load_profiles()
+        profile = profiles.get(profile_name, {})
+        mods = profile.get("mods", [])
+        favs = load_favorites()
+        display_name = INTERNAL_TO_DISPLAY.get(fighter_int)
+
+        for mod in mods:
+            if mod.get("mod_type", "skin") != "skin":
+                continue
+            mod_char = str(mod.get("character", ""))
+            if mod_char != display_name and FIGHTER_INTERNAL.get(mod_char) != fighter_int:
+                continue
+
+            slot_value = str(mod.get("slot", ""))
+            for part in slot_value.replace(",", " ").split():
+                slot = part.strip().lower()
+                if re.match(r"^c\d{2}$", slot):
+                    thumb_url = mod.get("thumb_url")
+                    if not thumb_url and mod.get("mod_id"):
+                        fav_meta = favs.get(str(mod.get("mod_id")), {})
+                        thumb_url = (fav_meta.get("thumb_url")
+                                     or fav_meta.get("_cached_thumb_url"))
+                    occupied[slot] = {
+                        "mod": mod.get("folder_name") or mod.get("name", "?"),
+                        "name": mod.get("name", "?"),
+                        "thumb_url": thumb_url,
+                        "mod_id": mod.get("mod_id"),
+                    }
+
+        return occupied
+
+    def _recolor_all_slot_pickers(self):
+        """Recolor every registered slot-picker button to reflect current
+        profile / SD occupancy without rebuilding the view."""
+        if not self._slot_picker_registry:
+            return
+        # Cache occupancy per fighter so we don't hit disk repeatedly
+        occ_cache = {}
+        for entry in self._slot_picker_registry:
+            btn, fighter_int, slot, card_mod_id = entry
+            try:
+                if not btn.winfo_exists():
+                    continue
+            except Exception:
+                continue
+
+            key = (self._profile_mode, self._profile_mode_target, fighter_int)
+            if key not in occ_cache:
+                if fighter_int and self._profile_mode and self._profile_mode_target:
+                    occ_cache[key] = self._get_profile_occupied_slots(
+                        self._profile_mode_target, fighter_int)
+                else:
+                    occ_cache[key] = get_occupied_slots(fighter_int) if fighter_int else {}
+            occupied = occ_cache[key]
+
+            slot_info = occupied.get(slot)
+            is_filled = slot_info is not None
+            is_self = (is_filled
+                       and card_mod_id is not None
+                       and str(slot_info.get("mod_id") or "") == str(card_mod_id))
+
+            if is_self:
+                new_bg, new_fg = T.ACCENT, T.BG
+            elif is_filled:
+                new_bg, new_fg = T.GREEN, T.BG
+            else:
+                new_bg, new_fg = T.SURFACE1, T.OVERLAY
+
+            try:
+                # Don't revert an optimistic click: if we'd go gray but the
+                # button is already blue (ACCENT), a pending write hasn't
+                # landed yet — trust the in-place update and skip.
+                try:
+                    current_bg = btn.cget("bg")
+                except Exception:
+                    current_bg = ""
+                if new_bg == T.SURFACE1 and current_bg == T.ACCENT:
+                    continue
+
+                btn.configure(bg=new_bg, fg=new_fg)
+                # Rebind hover so tooltip / leave-color stay in sync
+                friendly = slot_info["name"] if is_filled else None
+                thumb = slot_info.get("thumb_url") if is_filled else None
+                if is_filled:
+                    btn.bind("<Enter>", lambda e, b=btn, t=friendly, tu=thumb: (
+                        b.configure(bg=T.YELLOW, fg=T.BG),
+                        self._show_tooltip(b, t, thumb_url=tu)))
+                    btn.bind("<Leave>", lambda e, b=btn, c=new_bg: (
+                        b.configure(bg=c, fg=T.BG),
+                        self._hide_tooltip()))
+                else:
+                    btn.bind("<Enter>", lambda e, b=btn: (
+                        b.configure(bg=T.OVERLAY, fg=T.BG),
+                        self._show_tooltip(b, "Empty — click to install")))
+                    btn.bind("<Leave>", lambda e, b=btn: (
+                        b.configure(bg=T.SURFACE1, fg=T.OVERLAY),
+                        self._hide_tooltip()))
+            except Exception:
+                pass
+
+        # Update slot counter labels
+        for lbl, card_mod_id in self._slot_counter_registry:
+            self._update_slot_counter(lbl, card_mod_id)
+
     def _refresh_current_view(self):
         """Re-render the current view so slot pickers pick up SD changes."""
         if self._active_view == "browse":
@@ -2632,9 +2867,14 @@ class GameBananaBrowser:
         self.results_label.configure(text=lbl)
 
         # Clear results
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
         self._thumb_cache.clear()
+        # Reset scroll position and region when clearing, to avoid stale state
+        self.results_canvas.yview_moveto(0)
+        self.results_canvas.configure(scrollregion="0 0 0 0")
 
         # ── Filter bar (type dropdown) ──
         filter_bar = tk.Frame(self.results_inner, bg=T.SURFACE1)
@@ -2806,11 +3046,11 @@ class GameBananaBrowser:
         if has_files:
             if is_stage:
                 # Stage mod: simple install (no slot picker)
-                tk.Button(btn_row, text="Install Stage to SD", width=18,
+                tk.Button(btn_row, text="Install", width=18,
                           bg=T.GREEN, fg=T.BG, font=(T.FONT, T.SZ_MD, "bold"),
                           relief="flat", cursor="hand2",
                           command=lambda mid=mod_id, mn=name, m=meta: self._run_async(
-                              self._do_install_to_sd, mid, mn,
+                              self._install_mod, mid, mn,
                               {**m, "mod_type": "stage"})
                           ).pack(side="left", padx=(0, 6))
             else:
@@ -2820,11 +3060,11 @@ class GameBananaBrowser:
                 if fighter_int:
                     self._add_slot_picker(btn_row, mod_id, name, meta, fighter_int)
                 else:
-                    tk.Button(btn_row, text="Install to SD", width=14,
+                    tk.Button(btn_row, text="Install", width=14,
                               bg=T.GREEN, fg=T.BG, font=(T.FONT, T.SZ_MD, "bold"),
                               relief="flat", cursor="hand2",
                               command=lambda mid=mod_id, mn=name, m=meta: self._run_async(
-                                  self._do_install_to_sd, mid, mn, m)
+                                  self._install_mod, mid, mn, m)
                               ).pack(side="left", padx=(0, 6))
 
         # Second button row for unfav/open
@@ -2860,25 +3100,6 @@ class GameBananaBrowser:
                   fg=T.BG, font=(T.FONT, T.SZ_SM, "bold"),
                   relief="flat", cursor="hand2",
                   command=_reassign_category).pack(side="left", padx=(0, 6))
-
-        # "Add to Profile" button
-        def _add_to_prof_fav(m=meta):
-            entry = {
-                "mod_id": m.get("mod_id"),
-                "name": m.get("name", "?"),
-                "character": _guess_character_from_meta(m) or "Other",
-                "mod_type": m.get("mod_type", "skin"),
-                "thumb_url": m.get("thumb_url"),
-                "image_urls": m.get("image_urls", []),
-                "url": m.get("url", ""),
-                "submitter": m.get("submitter", ""),
-            }
-            self._pick_profile_and_add(entry)
-
-        tk.Button(btn_row2, text="+ Profile", width=10,
-                  bg=T.SURFACE1, fg=T.FG, font=(T.FONT, T.SZ_SM, "bold"),
-                  relief="flat", cursor="hand2",
-                  command=_add_to_prof_fav).pack(side="left", padx=(0, 6))
 
     def _reassign_favorite_category(self, mod_id, mod_name):
         """Show a dialog to reassign a favorite's mod_type (skin/stage)
@@ -3005,9 +3226,14 @@ class GameBananaBrowser:
         self.page_label.configure(text="")
 
         # Clear results
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
         self._thumb_cache.clear()
+        # Reset scroll position and region when clearing, to avoid stale state
+        self.results_canvas.yview_moveto(0)
+        self.results_canvas.configure(scrollregion="0 0 0 0")
 
         if not os.path.exists(ARCROPOLIS_MODS):
             self.results_label.configure(text="SD card mods folder not found")
@@ -3427,71 +3653,21 @@ class GameBananaBrowser:
                       command=lambda u=gb_url: os.startfile(u)
                       ).pack(side="left", padx=(0, 6))
 
-        # Favorite toggle (only if we have mod_id from metadata)
-        mod_id = meta.get("mod_id") if meta else None
-        if mod_id:
-            is_fav = is_favorite(mod_id)
-            fav_text = "♥ Favorited" if is_fav else "♡ Favorite"
-            fav_bg = T.PEACH if is_fav else T.SURFACE1
-            fav_fg = T.BG if is_fav else T.FG
-
-            def _toggle_installed_fav(mid=mod_id, m=meta, btn=None,
-                                     mtype=skin.get("mod_type", "skin")):
-                if is_favorite(mid):
-                    remove_favorite(mid)
-                    print(f"  Removed '{m.get('name', '?')}' from favorites")
-                    if btn:
-                        btn.configure(text="♡ Favorite",
-                                      bg=T.SURFACE1, fg=T.FG)
-                else:
-                    # Build a pseudo API record from .gb_meta.json
-                    pseudo_rec = {
-                        "_sName": m.get("name", "Unknown"),
-                        "_aSubmitter": {"_sName": m.get("submitter", "?")},
-                        "_nLikeCount": m.get("likes", 0),
-                        "_nViewCount": m.get("views", 0),
-                        "_bHasFiles": True,
-                        "_sProfileUrl": m.get("url", ""),
-                        "_aTags": m.get("tags", []),
-                        "_sInitialVisibility": m.get(
-                            "initial_visibility", "show"),
-                        "_bHasContentRatings": m.get(
-                            "has_content_ratings", False),
-                    }
-                    # Preserve thumbnail info
-                    if m.get("thumb_url"):
-                        pseudo_rec["_cached_thumb_url"] = m["thumb_url"]
-                    if m.get("image_urls"):
-                        pseudo_rec["_cached_image_urls"] = m["image_urls"]
-                    add_favorite(mid, pseudo_rec, mod_type=mtype)
-                    print(f"  Added '{m.get('name', '?')}' to favorites"
-                          f" (type={mtype})")
-                    if btn:
-                        btn.configure(text="♥ Favorited",
-                                      bg=T.PEACH, fg=T.BG)
-
-            fav_btn = tk.Button(btn_row, text=fav_text, width=12,
-                                bg=fav_bg, fg=fav_fg,
-                                font=(T.FONT, T.SZ_SM, "bold"),
-                                relief="flat", cursor="hand2")
-            fav_btn.configure(
-                command=lambda b=fav_btn, mid=mod_id, m=meta:
-                    _toggle_installed_fav(mid, m, b))
-            fav_btn.pack(side="left")
-
     def _create_profile_from_installed_ui(self):
-        """Prompt for a name and snapshot current installed mods as a profile."""
-        if not os.path.exists(ARCROPOLIS_MODS):
-            messagebox.showwarning("No SD", "SD card mods folder not found.")
-            return
-        skins = list_installed_skins()
-        if not skins:
-            messagebox.showinfo("Empty", "No mods installed to save.")
-            return
+        """Prompt for a name and create a profile from installed mods if available.
+        Falls back to creating an empty profile when SD mods are unavailable."""
+        can_snapshot = os.path.exists(ARCROPOLIS_MODS)
+        skins = list_installed_skins() if can_snapshot else []
+        snap_count = len(skins)
 
-        name = simpledialog.askstring(
-            "Save Profile", f"Name for this profile ({len(skins)} mods):",
-            parent=self.root)
+        if snap_count:
+            title = "Save Profile"
+            prompt = f"Name for this profile ({snap_count} mods):"
+        else:
+            title = "Create Profile"
+            prompt = "Name for new empty profile:"
+
+        name = simpledialog.askstring(title, prompt, parent=self.root)
         if not name or not name.strip():
             return
         name = name.strip()
@@ -3506,11 +3682,28 @@ class GameBananaBrowser:
                     f"Overwrite it?"):
                 return
 
-        count = create_profile_from_installed(name)
-        print(f"\n=== Saved profile '{name}' with {count} mod(s) ===\n")
-        messagebox.showinfo("Profile Saved",
-                            f"Saved '{name}' with {count} mod(s).\n\n"
-                            "Go to the Profiles tab to manage or load it.")
+        if snap_count:
+            count = create_profile_from_installed(name)
+            print(f"\n=== Saved profile '{name}' with {count} mod(s) ===\n")
+            messagebox.showinfo(
+                "Profile Saved",
+                f"Saved '{name}' with {count} mod(s).\n\n"
+                "Go to the Profiles tab to manage or load it.")
+        else:
+            profiles = load_profiles()
+            profiles[name] = {
+                "created": datetime.now().isoformat(),
+                "mod_count": 0,
+                "mods": [],
+            }
+            save_profiles(profiles)
+            print(f"\n=== Created empty profile '{name}' ===\n")
+            messagebox.showinfo(
+                "Profile Created",
+                f"Created empty profile '{name}'.\n\n"
+                "Use Profile Mode while browsing to add mods.")
+        if self._active_view == "profiles":
+            self._show_profiles()
 
     # ── "Add to Profile" picker dialog ──
 
@@ -3655,14 +3848,30 @@ class GameBananaBrowser:
         self.next_btn.configure(state="disabled")
         self.page_label.configure(text="")
 
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
+
+        # Reset scroll position and region when clearing, to avoid stale state
+        self.results_canvas.yview_moveto(0)
+        self.results_canvas.configure(scrollregion="0 0 0 0")
 
         profiles = load_profiles()
         if not isinstance(profiles, dict):
             print("  Warning: profile data is not a dict; resetting view.", file=sys.stderr)
             profiles = {}
         self.results_label.configure(text=f"{len(profiles)} profile(s)")
+
+        action_bar = tk.Frame(self.results_inner, bg=T.SURFACE)
+        action_bar.pack(fill="x", padx=4, pady=(6, 4))
+
+        tk.Button(
+            action_bar, text="Create Profile", width=14,
+            bg=T.ACCENT, fg=T.BG, font=(T.FONT, T.SZ_MD, "bold"),
+            relief="flat", cursor="hand2",
+            command=self._create_profile_from_installed_ui,
+        ).pack(side="left", padx=8, pady=6)
 
         if not profiles:
             tk.Label(self.results_inner,
@@ -3801,18 +4010,15 @@ class GameBananaBrowser:
 
     def _open_profile(self, profile_name):
         """Open a profile detail view showing each mod with thumbnails and remove buttons."""
-        def _do_autoslot():
-            try:
-                slot_fix = autoslot_missing_profile_entries(profile_name)
-                if slot_fix.get("assigned", 0):
-                    print(f"  Auto-slotted {slot_fix['assigned']} missing entries.")
-                if slot_fix.get("unslotted", 0):
-                    print(f"  {slot_fix['unslotted']} skins unslotted (all slots used).")
-            except Exception as e:
-                import sys
-                print(f"  Auto-slot error: {e}", file=sys.stderr)
-        
-        threading.Thread(target=_do_autoslot, daemon=True).start()
+        try:
+            slot_fix = autoslot_missing_profile_entries(profile_name)
+            if slot_fix.get("assigned", 0):
+                print(f"  Auto-slotted {slot_fix['assigned']} missing entries.")
+            if slot_fix.get("unslotted", 0):
+                print(f"  {slot_fix['unslotted']} skins unslotted (all slots used).")
+        except Exception as e:
+            import sys
+            print(f"  Auto-slot error: {e}", file=sys.stderr)
 
         profiles = load_profiles()
         profile = profiles.get(profile_name)
@@ -3823,6 +4029,8 @@ class GameBananaBrowser:
         self.next_btn.configure(state="disabled")
         self.page_label.configure(text="")
 
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
 
@@ -3933,6 +4141,10 @@ class GameBananaBrowser:
                     tk.Label(slot_row, text=s, bg=T.GREEN, fg=T.BG,
                              font=(T.MONO, T.SZ_XS, "bold"),
                              padx=4, pady=1).pack(side="left", padx=(0, 3))
+        elif mod.get("mod_type", "skin") == "skin":
+            tk.Label(info, text="No slot assigned", bg=T.SURFACE1, fg=T.OVERLAY,
+                     font=(T.MONO, T.SZ_XS, "bold"), padx=6, pady=2,
+                     anchor="w").pack(fill="x", pady=(2, 0))
 
         detail_parts = []
         if submitter:
@@ -4124,6 +4336,7 @@ class GameBananaBrowser:
     def _start_sd_poll(self):
         """Begin polling for SD card insertion/removal every 2 seconds."""
         self._stop_sd_poll()  # cancel any existing timer first
+        _apply_sd_drive(_detect_sd_drive())
         self._sd_present = os.path.exists(SD_CARD)
         self._poll_sd_card()
 
@@ -4134,11 +4347,17 @@ class GameBananaBrowser:
             self._sd_poll_id = None
 
     def _poll_sd_card(self):
-        """Check if SD card state changed; auto-refresh Setup tab if so."""
-        now_present = os.path.exists(SD_CARD)
-        if now_present != self._sd_present:
+        """Check if SD card state changed (or drive letter swapped); auto-refresh Setup tab if so."""
+        detected = _detect_sd_drive()
+        now_present = os.path.exists(detected)
+        drive_changed = now_present and (detected != SD_CARD)
+        if now_present != self._sd_present or drive_changed:
             self._sd_present = now_present
-            state = "detected" if now_present else "removed"
+            if now_present:
+                _apply_sd_drive(detected)
+                state = f"detected at {SD_CARD}"
+            else:
+                state = "removed"
             print(f"  [SD poll] SD card {state} — refreshing…")
             # Always update the top-right SD status label
             self._check_sd()
@@ -4349,9 +4568,14 @@ class GameBananaBrowser:
 
     def _build_setup_ui(self, checks, latest):
         """Build the full Setup tab UI with check results."""
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
         self._thumb_cache.clear()
+        # Reset scroll position and region when clearing, to avoid stale state
+        self.results_canvas.yview_moveto(0)
+        self.results_canvas.configure(scrollregion="0 0 0 0")
 
         profile = PROVISIONING_PROFILES.get(self._active_profile, {})
         profile_desc = profile.get("desc", "")
@@ -6262,6 +6486,8 @@ class GameBananaBrowser:
             self.prev_btn.configure(state="disabled")
             self.next_btn.configure(state="disabled")
             if not cached_flagged:
+                self._slot_picker_registry.clear()
+                self._slot_counter_registry.clear()
                 for w in self.results_inner.winfo_children():
                     w.destroy()
                 tk.Label(self.results_inner,
@@ -6466,6 +6692,8 @@ class GameBananaBrowser:
     def _render_audit_results(self, flagged, total_scanned, total_api,
                               pages_scanned, label, complete):
         """Build the Adult Only audit results UI from cached data."""
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
         self._thumb_cache.clear()
@@ -6588,6 +6816,8 @@ class GameBananaBrowser:
 
     def _populate_results(self, records):
         """Build result cards in the results pane."""
+        self._slot_picker_registry.clear()
+        self._slot_counter_registry.clear()
         for w in self.results_inner.winfo_children():
             w.destroy()
         self._thumb_cache.clear()
@@ -6794,12 +7024,12 @@ class GameBananaBrowser:
             if self._is_stage_mode():
                 # ── Stage mode: simple install (no slot picker) ──
                 _meta["mod_type"] = "stage"
-                tk.Button(btn_row, text="Install Stage to SD", width=18,
+                tk.Button(btn_row, text="Install", width=18,
                           bg=T.GREEN, fg=T.BG, font=(T.FONT, T.SZ_MD, "bold"),
                           relief="flat", cursor="hand2",
                           command=lambda mid=mod_id, mn=name, m=_meta:
                               self._run_async(
-                                  self._do_install_to_sd, mid, mn, m)
+                                  self._install_mod, mid, mn, m)
                           ).pack(side="left", padx=(0, 6))
             else:
                 # ── Skin mode: slot picker ──
@@ -6813,87 +7043,114 @@ class GameBananaBrowser:
                         "tags": tags, "name": name})
                     fighter_int = FIGHTER_INTERNAL.get(guessed)
 
+                # Backfill character + mod_type so profile entries match correctly
+                _meta["mod_type"] = "skin"
+                if fighter_int:
+                    _meta["character"] = INTERNAL_TO_DISPLAY.get(
+                        fighter_int, fighter_display)
+                elif not _meta.get("character"):
+                    _meta["character"] = _guess_character_from_meta(
+                        {"tags": tags, "name": name}) or "Other"
+
                 # Show slot picker row (with or without occupied info)
                 self._add_slot_picker(btn_row, mod_id, name, _meta, fighter_int)
 
-        # Second row: Favorite + Open Page
+        # Button row: Favorite + Open Page
         btn_row2 = tk.Frame(info, bg=T.BG)
         btn_row2.pack(fill="x", pady=(2, 0))
 
-        # Favorite toggle
-        fav_text = "Unfavorite" if is_favorite(mod_id) else "Favorite"
-        fav_color = T.PEACH if is_favorite(mod_id) else T.SURFACE1
-        fav_fg = T.BG if is_favorite(mod_id) else T.FG
+        if mod_id:
+            is_fav = is_favorite(mod_id)
+            fav_text = "♥ Favorited" if is_fav else "♡ Favorite"
+            fav_bg   = T.PEACH if is_fav else T.SURFACE1
+            fav_fg   = T.BG    if is_fav else T.FG
 
-        def _toggle_fav(mid=mod_id, r=rec, btn=None,
-                        mtype=_meta.get("mod_type", "skin")):
-            if is_favorite(mid):
-                remove_favorite(mid)
-                print(f"  Removed '{r.get('_sName', '?')}' from favorites")
-                if btn:
-                    btn.configure(text="Favorite", bg=T.SURFACE1, fg=T.FG)
-            else:
-                add_favorite(mid, r, mod_type=mtype)
-                print(f"  Added '{r.get('_sName', '?')}' to favorites")
-                if btn:
-                    btn.configure(text="Unfavorite", bg=T.PEACH, fg=T.BG)
+            def _toggle_fav(mid=mod_id, r=rec, btn=None,
+                            mtype=_meta.get("mod_type", "skin")):
+                if is_favorite(mid):
+                    remove_favorite(mid)
+                    print(f"  Removed '{r.get('_sName', '?')}' from favorites")
+                    if btn:
+                        btn.configure(text="♡ Favorite", bg=T.SURFACE1, fg=T.FG)
+                else:
+                    add_favorite(mid, r, mod_type=mtype)
+                    print(f"  Added '{r.get('_sName', '?')}' to favorites")
+                    if btn:
+                        btn.configure(text="♥ Favorited", bg=T.PEACH, fg=T.BG)
 
-        fav_btn = tk.Button(btn_row2, text=fav_text, width=10,
-                            bg=fav_color, fg=fav_fg, font=(T.FONT, T.SZ_SM, "bold"),
-                            relief="flat", cursor="hand2")
-        fav_btn.configure(command=lambda b=fav_btn, mid=mod_id, r=rec: _toggle_fav(mid, r, b))
-        fav_btn.pack(side="left", padx=(0, 6))
+            fav_btn = tk.Button(btn_row2, text=fav_text, width=12,
+                                bg=fav_bg, fg=fav_fg,
+                                font=(T.FONT, T.SZ_SM, "bold"),
+                                relief="flat", cursor="hand2")
+            fav_btn.configure(command=lambda b=fav_btn: _toggle_fav(btn=b))
+            fav_btn.pack(side="left", padx=(0, 6))
 
         if url:
             tk.Button(btn_row2, text="Open Page", width=10,
                       bg=T.SURFACE1, fg=T.FG, font=(T.FONT, T.SZ_SM),
                       relief="flat", cursor="hand2",
                       command=lambda u=url: os.startfile(u)
-                      ).pack(side="left")
-
-        # "Add to Profile" button
-        def _add_to_profile(m=_meta):
-            char = _guess_character_from_meta(m)
-            entry = {
-                "mod_id": m.get("mod_id"),
-                "name": m.get("name", "?"),
-                "character": char or "Other",
-                "mod_type": m.get("mod_type", "skin"),
-                "thumb_url": m.get("thumb_url"),
-                "image_urls": m.get("image_urls", []),
-                "url": m.get("url", ""),
-                "submitter": m.get("submitter", ""),
-            }
-            self._pick_profile_and_add(entry)
-
-        tk.Button(btn_row2, text="+ Profile", width=10,
-                  bg=T.ACCENT, fg=T.BG, font=(T.FONT, T.SZ_SM, "bold"),
-                  relief="flat", cursor="hand2",
-                  command=_add_to_profile).pack(side="left", padx=(6, 0))
+                      ).pack(side="left", padx=(0, 6))
 
     def _add_slot_picker(self, parent, mod_id, mod_name, metadata, fighter_int):
         """Show 'Install to:' label + c00–c07 slot buttons.
         Filled slots show green, empty ones are greyed out.
+        In Profile Mode, occupancy comes from the selected profile.
         fighter_int may be None if the fighter couldn't be determined."""
-        occupied = get_occupied_slots(fighter_int) if fighter_int else {}
+        if fighter_int and self._profile_mode and self._profile_mode_target:
+            occupied = self._get_profile_occupied_slots(
+                self._profile_mode_target, fighter_int)
+        else:
+            occupied = get_occupied_slots(fighter_int) if fighter_int else {}
 
         tk.Label(parent, text="Install to:", bg=T.BG, fg=T.OVERLAY,
                  font=(T.FONT, T.SZ_MD, "bold")).pack(side="left", padx=(0, 4))
+
+        def _bind_filled(b, name, thumb, base_color=None):
+            bc = base_color or T.GREEN
+            b.bind("<Enter>", lambda e, b=b, t=name, tu=thumb: (
+                b.configure(bg=T.YELLOW, fg=T.BG),
+                self._show_tooltip(b, t, thumb_url=tu)))
+            b.bind("<Leave>", lambda e, b=b, c=bc: (
+                b.configure(bg=c, fg=T.BG),
+                self._hide_tooltip()))
+
+        def _bind_empty(b):
+            b.bind("<Enter>", lambda e, b=b: (
+                b.configure(bg=T.OVERLAY, fg=T.BG),
+                self._show_tooltip(b, "Empty — click to install")))
+            b.bind("<Leave>", lambda e, b=b: (
+                b.configure(bg=T.SURFACE1, fg=T.OVERLAY),
+                self._hide_tooltip()))
 
         for i in range(8):
             slot = f"c{i:02d}"
             slot_info = occupied.get(slot)
             is_filled = slot_info is not None
+            # Blue when this exact mod is already in this slot
+            is_self = (is_filled
+                       and mod_id is not None
+                       and str(slot_info.get("mod_id") or "") == str(mod_id))
 
-            if is_filled:
+            if is_self:
+                bg = T.ACCENT
+                fg = T.BG
+            elif is_filled:
                 bg = T.GREEN
                 fg = T.BG
             else:
                 bg = T.SURFACE1
                 fg = T.OVERLAY
 
+            btn = tk.Button(
+                parent, text=slot, width=3,
+                bg=bg, fg=fg, font=(T.MONO, T.SZ_XS, "bold"),
+                relief="flat", cursor="hand2",
+            )
+            btn.pack(side="left", padx=1)
+
             def _on_click(mid=mod_id, mn=mod_name, m=metadata, s=slot,
-                          si=slot_info, filled=is_filled):
+                          si=slot_info, filled=is_filled, b=btn):
                 if filled:
                     friendly = si["name"]
                     if not messagebox.askyesno(
@@ -6901,33 +7158,72 @@ class GameBananaBrowser:
                             f"Slot {s} already has:\n  {friendly}\n\n"
                             f"Replace with '{mn}'?"):
                         return
-                self._run_async(self._do_install_to_sd, mid, mn, m, s)
+                # Optimistic in-place update when adding to profile
+                if self._profile_mode and self._profile_mode_target:
+                    b.configure(bg=T.ACCENT, fg=T.BG)
+                    thumb = m.get("thumb_url") if m else None
+                    _bind_filled(b, mn, thumb, base_color=T.ACCENT)
+                    # Optimistically increment counter label for this card
+                    for _lbl, _mid in self._slot_counter_registry:
+                        if str(_mid) == str(mid):
+                            try:
+                                cur = self._count_mod_slots_in_profile(mid)
+                                # +1 because the profile write happens async
+                                n = cur + 1
+                                _lbl.configure(text=f"+{n} slots" if n >= 2 else "")
+                            except Exception:
+                                pass
+                self._run_async(self._install_mod, mid, mn, m, s)
 
-            btn = tk.Button(
-                parent, text=slot, width=3,
-                bg=bg, fg=fg, font=(T.MONO, T.SZ_XS, "bold"),
-                relief="flat", cursor="hand2",
-                command=_on_click,
-            )
-            btn.pack(side="left", padx=1)
+            btn.configure(command=_on_click)
 
             # Hover effects with thumbnail tooltip
             if is_filled:
                 friendly = slot_info["name"]
                 thumb = slot_info.get("thumb_url")
-                btn.bind("<Enter>", lambda e, b=btn, t=friendly, tu=thumb: (
-                    b.configure(bg=T.YELLOW, fg=T.BG),
-                    self._show_tooltip(b, t, thumb_url=tu)))
-                btn.bind("<Leave>", lambda e, b=btn: (
-                    b.configure(bg=T.GREEN, fg=T.BG),
-                    self._hide_tooltip()))
+                _bind_filled(btn, friendly, thumb, base_color=bg)
             else:
-                btn.bind("<Enter>", lambda e, b=btn: (
-                    b.configure(bg=T.OVERLAY, fg=T.BG),
-                    self._show_tooltip(b, "Empty — click to install")))
-                btn.bind("<Leave>", lambda e, b=btn: (
-                    b.configure(bg=T.SURFACE1, fg=T.OVERLAY),
-                    self._hide_tooltip()))
+                _bind_empty(btn)
+
+            # Register so recolor can update all pickers without full rebuild
+            self._slot_picker_registry.append((btn, fighter_int, slot, mod_id))
+
+        # Slot counter label — shows how many slots this mod occupies in the profile
+        count_lbl = tk.Label(parent, text="", bg=T.BG, fg=T.ACCENT,
+                             font=(T.MONO, T.SZ_XS, "bold"))
+        count_lbl.pack(side="left", padx=(6, 0))
+        self._slot_counter_registry.append((count_lbl, mod_id))
+        # Initialise the counter right away
+        self._update_slot_counter(count_lbl, mod_id)
+
+    def _count_mod_slots_in_profile(self, mod_id):
+        """Return number of slots the given mod occupies in the active profile."""
+        if not self._profile_mode or not self._profile_mode_target or not mod_id:
+            return 0
+        profiles = load_profiles()
+        profile = profiles.get(self._profile_mode_target, {})
+        for m in profile.get("mods", []):
+            if str(m.get("mod_id", "")) == str(mod_id):
+                slots = [s.strip() for s in
+                         str(m.get("slot", "")).replace(",", " ").split()
+                         if re.match(r"^c\d{2}$", s.strip())]
+                return len(slots)
+        return 0
+
+    def _update_slot_counter(self, lbl, mod_id):
+        """Set the text of a slot-counter label for a given mod."""
+        try:
+            if not lbl.winfo_exists():
+                return
+        except Exception:
+            return
+        n = self._count_mod_slots_in_profile(mod_id)
+        if n >= 2:
+            lbl.configure(text=f"+{n} slots")
+        elif n == 1:
+            lbl.configure(text="")
+        else:
+            lbl.configure(text="")
 
     def _show_tooltip(self, widget, text, thumb_url=None):
         """Show a floating tooltip near a widget, optionally with a thumbnail."""
@@ -7294,6 +7590,74 @@ class GameBananaBrowser:
         _show_image(0)
 
     # ── Install actions ────────────────────────────────
+
+    def _install_mod(self, mod_id, mod_name, metadata=None, target_slot=None):
+        """Route mod installation based on profile mode.
+        If profile mode is on, add to selected profile. Otherwise, install to SD.
+        NOTE: self._profile_mode and self._profile_mode_target are plain Python
+        attributes kept in sync on the main thread by toggle/combo handlers.
+        Never read tkinter Vars here — this method runs in a background thread."""
+        if self._profile_mode:
+            if not self._profile_mode_target:
+                messagebox.showwarning(
+                    "Profile Mode",
+                    "Profile Mode is enabled, but no profile is selected.\n\n"
+                    "Choose a profile in the Profile dropdown (or create one), "
+                    "then try again.")
+                return
+            self._do_install_to_profile(mod_id, mod_name, metadata, target_slot,
+                                        profile_name=self._profile_mode_target)
+            return
+
+        # Normal mode: install to SD
+        self._do_install_to_sd(mod_id, mod_name, metadata, target_slot)
+
+    def _do_install_to_profile(self, mod_id, mod_name, metadata=None,
+                               target_slot=None, profile_name=None):
+        """Add a mod to the selected profile (profile mode).
+        Downloads and caches metadata, then adds entry to profile."""
+        target = profile_name or self._profile_mode_target
+        if not target:
+            messagebox.showerror("Profile Error", "No profile selected.")
+            return
+
+        print(f"\n=== Installing to profile '{target}': {mod_name} ===\n")
+
+        character = "Other"
+        if metadata:
+            character = (metadata.get("character")
+                         or _guess_character_from_meta(metadata)
+                         or "Other")
+
+        thumb_url = None
+        if metadata:
+            thumb_url = (metadata.get("thumb_url")
+                         or metadata.get("_cached_thumb_url"))
+
+        image_urls = []
+        if metadata:
+            image_urls = (metadata.get("image_urls")
+                          or metadata.get("_cached_image_urls")
+                          or [])
+
+        # Build mod entry from metadata
+        mod_entry = {
+            "mod_id": mod_id,
+            "name": mod_name,
+            "character": character,
+            "mod_type": metadata.get("mod_type", "skin") if metadata else "skin",
+            "slot": target_slot or "",
+            "thumb_url": thumb_url,
+            "image_urls": image_urls,
+            "url": metadata.get("url", "") if metadata else "",
+            "submitter": metadata.get("submitter", "") if metadata else "",
+        }
+
+        # Add to profile
+        count = add_mod_to_profile(target, mod_entry)
+        print(f"  Added '{mod_name}' to profile '{target}' ({count} mods total)")
+        # Recolor all visible slot pickers in-place (no scroll reset)
+        self.root.after(0, self._recolor_all_slot_pickers)
 
     def _do_install_to_sd(self, mod_id, mod_name, metadata=None, target_slot=None):
         """Download the first file of a mod and install directly to SD card.

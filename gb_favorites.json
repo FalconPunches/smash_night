@@ -325,15 +325,11 @@
     "mod_id": 409860,
     "name": "Creepypasta Jigglypuff",
     "submitter": "Krosis5669",
-    "likes": 32,
-    "views": 6243,
+    "likes": 0,
+    "views": 0,
     "has_files": true,
     "url": "https://gamebanana.com/mods/409860",
-    "tags": [
-      "Texture Importor: Switch Toolbox",
-      "Viewing Model: Super Smash Bros. Hex Editor",
-      "Software Used: Photoshop"
-    ],
+    "tags": [],
     "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_6360546d88ebe.jpg",
     "image_urls": [
       {
@@ -354,7 +350,8 @@
       }
     ],
     "initial_visibility": "show",
-    "has_content_ratings": false
+    "has_content_ratings": false,
+    "mod_type": "skin"
   },
   "543478": {
     "mod_id": 543478,
@@ -365,6 +362,7 @@
     "has_files": true,
     "url": "https://gamebanana.com/mods/543478",
     "tags": [
+      "Captain Falcon",
       "Software Used: Blender",
       "Software Used: Photoshop",
       "Software Used: ZBrush",
@@ -466,7 +464,8 @@
       }
     ],
     "initial_visibility": "show",
-    "has_content_ratings": false
+    "has_content_ratings": false,
+    "mod_type": "skin"
   },
   "388958": {
     "mod_id": 388958,
@@ -1137,6 +1136,660 @@
       {
         "large": "https://images.gamebanana.com/img/ss/mods/621ed32c3a0de.jpg",
         "thumb": "https://images.gamebanana.com/img/ss/mods/621ed32c3a0de.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "stage"
+  },
+  "577976": {
+    "mod_id": 577976,
+    "name": "Helmetless Captain Falcon",
+    "submitter": "JoeTEStrikesBack",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/577976",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_67bf634e8698a.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf634e8698a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_67bf634e8698a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63854b169.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63854b169.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63859a733.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63859a733.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf6386070ff.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf6386070ff.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf6385bee77.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf6385bee77.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf6385c49f0.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf6385c49f0.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c554cb4.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c554cb4.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c71f0ee.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c71f0ee.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c5a6911.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c5a6911.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c5cab1e.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c5cab1e.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fd86dd5.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fd86dd5.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fd64bd8.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fd64bd8.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fa3a933.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fa3a933.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fcc96ad.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fcc96ad.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c646514.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c646514.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c60bc5d.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c60bc5d.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c6df918.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c6df918.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63c6d9a6c.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63c6d9a6c.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fd44f60.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fd44f60.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fdbf7eb.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fdbf7eb.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf642ab2285.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf642ab2285.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63fdefb99.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63fdefb99.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf63f569ece.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf63f569ece.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf644613376.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf644613376.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf6447e7275.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf6447e7275.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf6449a8b7c.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf6449a8b7c.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf64487a178.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf64487a178.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf64491ef13.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf64491ef13.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf644862ee3.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf644862ee3.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/67bf644972271.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/67bf644972271.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "456648": {
+    "mod_id": 456648,
+    "name": "Ridley Plant",
+    "submitter": "Devory",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/456648",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_64b55d99a2f47.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55d99a2f47.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_64b55d99a2f47.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de678089.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de678089.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de829ee8.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de829ee8.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de5ac726.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de5ac726.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de68ff6b.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de68ff6b.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de6a7f61.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de6a7f61.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de80ee8d.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de80ee8d.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de2d9206.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de2d9206.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de7a9f0a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de7a9f0a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de69e4cc.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de69e4cc.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de8a8be8.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de8a8be8.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de8622c5.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de8622c5.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/64b55de8443af.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/64b55de8443af.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "175626": {
+    "mod_id": 175626,
+    "name": "Chain Chomp Sharpens Up!",
+    "submitter": "kalomaze",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/175626",
+    "tags": [
+      "Piranha Plant"
+    ],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_5c87401994ed9.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87401994ed9.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_5c87401994ed9.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87431a442f3.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c87431a442f3.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87431c5952e.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c87431c5952e.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87431c2b684.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c87431c2b684.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c8743541487f.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c8743541487f.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87431eafbd7.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c87431eafbd7.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87432e46d7b.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c87432e46d7b.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/5c87431cc9f9f.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/5c87431cc9f9f.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "490652": {
+    "mod_id": 490652,
+    "name": "Proto Piranha (Super Mario Sunshine)",
+    "submitter": "SmashAlternate",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/490652",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_65a75bb8113e8.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75bb8113e8.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_65a75bb8113e8.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75bdc023ea.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75bdc023ea.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75bfd90f7d.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75bfd90f7d.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c175a47b.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c175a47b.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c2323810.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c2323810.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c3361b64.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c3361b64.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c41856c3.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c41856c3.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c63151e1.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c63151e1.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c775b9a5.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c775b9a5.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c8bf3aa6.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c8bf3aa6.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75c9db872a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75c9db872a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75cbd3a6e3.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75cbd3a6e3.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75cd42faab.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75cd42faab.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75cdc13683.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75cdc13683.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75cf9653c4.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75cf9653c4.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75d090b517.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75d090b517.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/65a75d0eba42c.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/65a75d0eba42c.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "391738": {
+    "mod_id": 391738,
+    "name": "Chomper",
+    "submitter": "A_Thing",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/391738",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_62dee9326ac01.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9326ac01.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_62dee9326ac01.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e29ab57.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e29ab57.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9db90c98.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9db90c98.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e3d6fe0.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e3d6fe0.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e2b91c5.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e2b91c5.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9d55267a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9d55267a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9df7c2c2.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9df7c2c2.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9d57d019.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9d57d019.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9cc961da.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9cc961da.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9d5d6021.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9d5d6021.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9db85009.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9db85009.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9dc7a239.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9dc7a239.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9dda5af1.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9dda5af1.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9de1f206.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9de1f206.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9ddea182.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9ddea182.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9deb1a0e.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9deb1a0e.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e1ca6c1.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e1ca6c1.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e20cba2.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e20cba2.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e2ad9ad.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e2ad9ad.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e37e9b1.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e37e9b1.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e485ca9.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e485ca9.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e36b9b5.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e36b9b5.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/62dee9e51357b.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/62dee9e51357b.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "472329": {
+    "mod_id": 472329,
+    "name": "Deku Baba",
+    "submitter": "InnerMobius",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/472329",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_651efe4946318.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efe4946318.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_651efe4946318.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb09d2d67.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb09d2d67.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0d4150a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0d4150a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c714c3.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c714c3.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0a48ea2.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0a48ea2.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c54ee2.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c54ee2.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0cc6814.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0cc6814.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0a5f415.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0a5f415.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0b90a0f.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0b90a0f.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0bd53df.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0bd53df.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0bdf973.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0bdf973.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0bd3623.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0bd3623.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0be6005.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0be6005.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c4d613.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c4d613.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c8146c.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c8146c.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c85e11.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c85e11.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c81de1.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c81de1.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0ce9b8f.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0ce9b8f.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c70c6a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c70c6a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c7956b.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c7956b.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0d1a5ae.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0d1a5ae.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0d1fe72.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0d1fe72.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0bb2ffc.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0bb2ffc.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb08d9e60.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb08d9e60.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb09a0e8c.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb09a0e8c.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0d1c775.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0d1c775.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0d10798.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0d10798.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0ccbe79.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0ccbe79.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/651efb0c79c44.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/651efb0c79c44.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "656957": {
+    "mod_id": 656957,
+    "name": "Piranha FLUDD",
+    "submitter": "nanobuds",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/656957",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_69a497cb7d40b.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497cb7d40b.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_69a497cb7d40b.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497c6bff9a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69a497c6bff9a.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497c6c3176.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69a497c6c3176.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497c6c1b58.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69a497c6c1b58.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497c6c917f.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69a497c6c917f.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497c6c35b7.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69a497c6c35b7.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69af89233b955.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69af89233b955.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/69a497c6c9729.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/69a497c6c9729.jpg"
+      }
+    ],
+    "initial_visibility": "show",
+    "has_content_ratings": false,
+    "mod_type": "skin"
+  },
+  "325749": {
+    "mod_id": 325749,
+    "name": "More competitive Umbra Clock Tower",
+    "submitter": "Ginn.",
+    "likes": 0,
+    "views": 0,
+    "has_files": true,
+    "url": "https://gamebanana.com/mods/325749",
+    "tags": [],
+    "thumb_url": "https://images.gamebanana.com/img/ss/mods/220-90_615a20df902bb.jpg",
+    "image_urls": [
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/615a20df902bb.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/530-90_615a20df902bb.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/615a20e2b0301.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/615a20e2b0301.jpg"
+      },
+      {
+        "large": "https://images.gamebanana.com/img/ss/mods/615a20e63953a.jpg",
+        "thumb": "https://images.gamebanana.com/img/ss/mods/615a20e63953a.jpg"
       }
     ],
     "initial_visibility": "show",
