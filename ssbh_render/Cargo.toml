@@ -1,0 +1,30 @@
+[package]
+name = "ssbh_render"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ssbh_render"
+path = "src/main.rs"
+
+# ssbh_wgpu's API is tightly coupled to specific wgpu versions; pin to
+# what its workspace uses (wgpu 29.x).
+[dependencies]
+ssbh_wgpu = { git = "https://github.com/ScanMountGoat/ssbh_wgpu", branch = "main" }
+ssbh_data = "0.19"
+wgpu = "29"
+glam = "0.28"
+image = "0.25"
+pollster = "0.3"
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+
+# Release profile: optimize for size & speed since this is a CLI tool
+# spawned per thumbnail.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

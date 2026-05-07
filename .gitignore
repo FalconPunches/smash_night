@@ -1,0 +1,48 @@
+# ── Caches ──────────────────────────────────────────────
+# Mod archive + extracted-tree cache. Lives under
+# %LOCALAPPDATA%/smash_night/mod_cache/ at runtime; the legacy
+# in-repo path is listed here so a fresh checkout never picks it
+# up again.
+.mod_cache/
+.render_cache/
+
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# ── Rust (ssbh_render) ──────────────────────────────────
+ssbh_render/target/
+**/*.rs.bk
+
+# ── Editor / IDE ────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+*.bak
+
+# ── Test/scratch artifacts ──────────────────────────────
+_test_*.png
+*.tmp
+
+# ── Tools the app auto-downloads (not source) ───────────
+ssbh_editor/
+ultimate_tex_cli/
+
+# ── User-state JSONs ────────────────────────────────────
+# gb_profiles.json and friends are personal — don't share via git.
+gb_profiles.json
+gb_favorites.json
+gb_audit_cache.json
+gb_touched_cache.json
+gb_sets.json
+
+# ── Switch SD provisioning downloads ────────────────────
+switch_setup/downloads/

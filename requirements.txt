@@ -1,0 +1,24 @@
+# Smash Night runtime dependencies.
+# Install with:  python -m pip install -r requirements.txt
+# (or run setup.bat to do the whole thing in one go)
+
+# ── Network / Imaging (always required) ──
+requests>=2.31
+urllib3>=1.26
+Pillow>=10.0
+
+# ── Archive extractors ──
+# .zip is built into Python; py7zr handles .7z and rarfile handles .rar.
+# rarfile additionally needs the `unrar` binary on PATH for the rar extraction
+# itself — but Smash Night only falls back to it when an archive is rar-format,
+# so most users never hit it.
+py7zr>=0.20
+rarfile>=4.1
+
+# ── 3D model preview (pyrender fallback path) ──
+# numpy 2.0 broke pyrender's reference to np.infty; the app installs a runtime
+# shim (np.infty = np.inf) so any 1.x or 2.x numpy works.
+numpy
+trimesh>=4.0
+pyrender>=0.1.45
+ssbh_data_py>=0.9
