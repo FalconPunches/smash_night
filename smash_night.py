@@ -13,6 +13,110 @@ Uses the GameBanana API v11:
 Requires: requests, Pillow (for thumbnails)
 """
 
+# ── Dependency bootstrap ──────────────────────────────────────────────────────
+# Check for missing pip packages and auto-install them from requirements.txt
+# before anything else runs. On success the script re-execs itself so all
+# imports see the freshly-installed packages.
+def _bootstrap_deps():
+    import importlib.util, subprocess, os, sys
+    _REQUIRED = {          # import-name : pip package name
+        "requests":     "requests",
+        "PIL":          "Pillow",
+        "py7zr":        "py7zr",
+        "rarfile":      "rarfile",
+        "numpy":        "numpy",
+        "ssbh_data_py": "ssbh_data_py",
+        "trimesh":      "trimesh",
+        "pyrender":     "pyrender",
+    }
+    missing = [pip for imp, pip in _REQUIRED.items()
+               if importlib.util.find_spec(imp) is None]
+    # PyOpenGL 3.1.0 (pinned by pyrender) has a ctypes bug on Python 3.11+
+    # that breaks OffscreenRenderer. Upgrade silently if needed.
+    # Deliberately avoids importing `packaging` (may not be present).
+    try:
+        import OpenGL
+        parts = tuple(int(x) for x in OpenGL.__version__.split(".")[:3])
+        if parts < (3, 1, 7):
+            missing.append("PyOpenGL>=3.1.7")
+    except Exception:
+        missing.append("PyOpenGL>=3.1.7")
+    if missing:
+        req = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "requirements.txt")
+        if os.path.isfile(req):
+            print(f"[Smash Night] Installing missing packages: {', '.join(missing)}")
+            subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                    "-r", req, "--quiet"])
+        else:
+            print(f"[Smash Night] Installing missing packages: {', '.join(missing)}")
+            subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                    "--quiet"] + missing)
+        # Re-exec so the new packages are importable in this process
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+def _bootstrap_ssbh_render():
+    """Build ssbh_render.exe in the background if it's missing and cargo exists.
+
+    - If already built: do nothing (fast path).
+    - If cargo is on PATH: kick off `cargo build --release` on a daemon thread
+      so the UI still opens immediately. First build takes ~5-10 min.
+    - If cargo is missing: print a one-time hint pointing to winget.
+      Does NOT block startup or show a dialog — the app falls back to pyrender.
+    """
+    import os, sys, shutil, subprocess, threading
+
+    exe = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "ssbh_render", "target", "release", "ssbh_render.exe")
+    if os.path.isfile(exe):
+        return  # already built, nothing to do
+
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssbh_render")
+    if not os.path.isdir(src):
+        return  # source not present — skip silently
+
+    cargo = shutil.which("cargo")
+    if not cargo:
+        # Check common Rust install location in case PATH isn't refreshed yet
+        default = os.path.expanduser(r"~\.cargo\bin\cargo.exe")
+        if os.path.isfile(default):
+            cargo = default
+
+    if not cargo:
+        print(
+            "[Smash Night] ssbh_render not built — 3D previews will use pyrender "
+            "(colors may be off).\n"
+            "  For accurate renders, install Rust once:\n"
+            "    winget install Rustlang.Rustup\n"
+            "  Then reopen this app and it will build automatically.",
+            file=sys.stderr)
+        return
+
+    def _build():
+        print("[Smash Night] Building ssbh_render in background "
+              "(first run ~5-10 min)…")
+        try:
+            result = subprocess.run(
+                [cargo, "build", "--release"],
+                cwd=src,
+                capture_output=True, text=True)
+            if result.returncode == 0:
+                print("[Smash Night] ssbh_render built successfully — "
+                      "accurate 3D previews now enabled.")
+            else:
+                print(f"[Smash Night] ssbh_render build failed:\n"
+                      f"{result.stderr[-800:]}", file=sys.stderr)
+        except Exception as e:
+            print(f"[Smash Night] ssbh_render build error: {e}", file=sys.stderr)
+
+    threading.Thread(target=_build, daemon=True).start()
+
+
+_bootstrap_deps()
+_bootstrap_ssbh_render()
+# ─────────────────────────────────────────────────────────────────────────────
+
 import io
 import os
 import re
@@ -2576,13 +2680,6 @@ def _try_ssbh_render(model_dir, width, height, cache_path):
     pyrender path.
     """
     if not os.path.isfile(SSBH_RENDER_EXE):
-        # Binary not built — log once-ish so the user knows why renders
-        # look like the pre-Rust pyrender output.
-        if not getattr(_try_ssbh_render, "_warned_missing", False):
-            _try_ssbh_render._warned_missing = True
-            print(f"  ! ssbh_render.exe not found at {SSBH_RENDER_EXE} "
-                  "— falling back to pyrender (colors will be off).",
-                  file=sys.stderr)
         return None
     if not HAS_PIL:
         return None
