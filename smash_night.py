@@ -472,6 +472,25 @@ PAYLOAD_SEARCH_PATHS = [
 SD_DRIVE_PINNED = False
 
 
+def _sd_drive_plausible():
+    """True if SD_CARD currently exists AND is a credible Switch SD:
+    pinned by the user, removable, or carrying Switch CFW markers.
+
+    Guards against the ``SD_CANDIDATES[0]`` fallback: with no card
+    plugged in, _detect_sd_drive() falls back to E:\\ — and if E:\\
+    exists as an internal SSD, presence checks based on bare
+    ``os.path.exists(SD_CARD)`` would report a connected SD and
+    installs would silently land on the internal drive.
+    """
+    try:
+        if not os.path.exists(SD_CARD):
+            return False
+    except Exception:
+        return False
+    return SD_DRIVE_PINNED or _is_removable_drive(SD_CARD) \
+        or _looks_like_switch_sd(SD_CARD)
+
+
 def _apply_sd_drive(drive, pin=None):
     """Update all SD-card-derived module globals when the active drive changes.
 
@@ -1007,8 +1026,14 @@ def _detect_fighter_internal_from_archive(extracted_path):
 # ─────────────────────────────────────────────────────────
 
 # Metadata / non-game files that should be ignored during conflict checks.
-_META_FILES = frozenset((".gb_meta.json", "config.json", "README.txt",
-                         "README.md", "info.toml"))
+# These live at each mod's own root and are never merged into the game's
+# virtual romfs — counting them produced phantom "shared-resource overlap"
+# notes between completely unrelated mods (e.g. a Bowser skin vs a Falcon
+# skin, both shipping an ARCropolis preview.webp thumbnail).
+_META_FILES = frozenset((".gb_meta.json", "config.json", "readme.txt",
+                         "readme.md", "info.toml", "info.json",
+                         "preview.webp", "preview.png", "preview.jpg",
+                         "preview.jpeg", "changelog.txt", "changelog.md"))
 
 
 def _get_mod_file_set(mod_root_path):
@@ -1017,7 +1042,7 @@ def _get_mod_file_set(mod_root_path):
     result = set()
     for root, _dirs, files in os.walk(mod_root_path):
         for f in files:
-            if f in _META_FILES:
+            if f.lower() in _META_FILES:
                 continue
             rel = os.path.relpath(os.path.join(root, f),
                                   mod_root_path).replace("\\", "/")
@@ -8093,7 +8118,7 @@ class GameBananaBrowser:
             self._refresh_current_view()
 
     def _check_sd(self):
-        connected = os.path.exists(SD_CARD) and os.path.isdir(SD_CARD)
+        connected = _sd_drive_plausible() and os.path.isdir(SD_CARD)
         pin = " 📌" if SD_DRIVE_PINNED else ""
         if connected:
             self.sd_label.configure(
@@ -14637,7 +14662,7 @@ class GameBananaBrowser:
         self._stop_sd_poll()  # cancel any existing timer first
         if not SD_DRIVE_PINNED:
             _apply_sd_drive(_detect_sd_drive())
-        self._sd_present = os.path.exists(SD_CARD)
+        self._sd_present = _sd_drive_plausible()
         self._poll_sd_card()
 
     def _stop_sd_poll(self):
@@ -14650,8 +14675,15 @@ class GameBananaBrowser:
         """Check if SD card state changed (or drive letter swapped); auto-refresh Setup tab if so."""
         # When the user pinned a drive via the top-right selector, only
         # track its presence — never auto-switch to a different letter.
-        detected = SD_CARD if SD_DRIVE_PINNED else _detect_sd_drive()
-        now_present = os.path.exists(detected)
+        if SD_DRIVE_PINNED:
+            detected = SD_CARD
+            now_present = os.path.exists(detected)
+        else:
+            # No plausible SD at all → treat as removed; never fall
+            # back to a bare drive letter that merely exists (E:\ SSD).
+            plausible = _present_sd_drives()
+            detected = _detect_sd_drive() if plausible else SD_CARD
+            now_present = bool(plausible) and os.path.exists(detected)
         drive_changed = now_present and (detected != SD_CARD)
         if now_present != self._sd_present or drive_changed:
             self._sd_present = now_present
