@@ -3162,6 +3162,35 @@ def find_payload():
     return None
 
 
+def find_apx_driver_installer(smash_exe):
+    """Return the path of the bundled APX/libusbK driver installer that
+    ships next to TegraRcmSmash.exe, or None. On a fresh PC the Switch
+    shows up as an "APX" device with no driver (problem code 28) and
+    every injection fails until this is run once."""
+    installer = os.path.join(os.path.dirname(smash_exe),
+                             "apx_driver", "InstallDriver.exe")
+    return installer if os.path.isfile(installer) else None
+
+
+def install_apx_driver(smash_exe):
+    """Launch the bundled APX (libusbK) driver installer. Returns True if
+    the installer was launched (the user still has to approve UAC and
+    finish the wizard).
+
+    The exe carries its own requireAdministrator manifest, so it must go
+    through ShellExecuteW — a plain CreateProcess/subprocess call fails
+    with ERROR_ELEVATION_REQUIRED (WinError 740).
+    """
+    installer = find_apx_driver_installer(smash_exe)
+    if not installer:
+        return False
+    import ctypes
+    rc = ctypes.windll.shell32.ShellExecuteW(
+        None, "open", installer, None,
+        os.path.dirname(installer), 1)  # 1 = SW_SHOWNORMAL
+    return rc > 32  # ShellExecute returns >32 on success
+
+
 def inject_payload(smash_exe, payload_path):
     """Run TegraRcmSmash.exe to inject a payload.
 
@@ -16198,6 +16227,28 @@ class GameBananaBrowser:
                 print(f"  ✕ {message} (RC={rc})")
                 # Show detailed error in a messagebox
                 from tkinter import messagebox
+                # Driver-shaped failures (-1/-2: wrong libusbK version,
+                # -3/-4: wrong/none bound, -6: USB enumeration failed):
+                # offer the bundled APX driver installer instead of telling
+                # the user to go find Zadig.
+                if rc in (-1, -2, -3, -4, -6) \
+                        and find_apx_driver_installer(smash_exe):
+                    if messagebox.askyesno(
+                            "Inject Failed — USB driver problem",
+                            f"{message}\n\n"
+                            "Smash Night ships the official APX (libusbK) "
+                            "driver. Install it now?\n\n"
+                            "Approve the UAC prompt, finish the install "
+                            "wizard, then press Inject again."):
+                        if install_apx_driver(smash_exe):
+                            print("  Launched bundled APX driver installer.")
+                        else:
+                            messagebox.showerror(
+                                "Driver install failed",
+                                "Could not launch the bundled driver "
+                                "installer.\nRun it manually:\n"
+                                f"{find_apx_driver_installer(smash_exe)}")
+                    return
                 messagebox.showerror("Inject Failed", message)
 
         self.root.after(0, _update_ui)
