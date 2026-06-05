@@ -46,3 +46,6 @@ gb_sets.json
 
 # ── Switch SD provisioning downloads ────────────────────
 switch_setup/downloads/
+
+# Runtime state: rotating banner counter, bumped on every launch
+assets/banners/.banner_index
