@@ -18,10 +18,21 @@ rarfile>=4.1
 # ── 3D model preview (pyrender fallback path) ──
 # numpy 2.0 broke pyrender's reference to np.infty; the app installs a runtime
 # shim (np.infty = np.inf) so any 1.x or 2.x numpy works.
+# NOTE: ssbh_data_py ships wheels only up to Python 3.12 — use Python
+# 3.10–3.12 for the venv (setup.bat handles this automatically).
 numpy
 trimesh>=4.0
-pyrender>=0.1.45
 ssbh_data_py>=0.9
-# pyrender pins PyOpenGL==3.1.0 which has a ctypes bug on Python 3.11+.
-# Override it here so pip installs 3.1.7+ which fixes the OffscreenRenderer.
+# pyrender is NOT listed here on purpose: it hard-pins PyOpenGL==3.1.0,
+# which modern pip refuses to resolve against the >=3.1.7 override below
+# (ResolutionImpossible — the whole -r install would fail). It is installed
+# separately with `pip install --no-deps pyrender>=0.1.45` (setup.bat and
+# the in-app bootstrap both do this). Its real dependencies are listed here
+# so --no-deps leaves nothing missing:
 PyOpenGL>=3.1.7
+freetype-py
+imageio
+networkx
+pyglet>=1.4.10
+scipy
+six

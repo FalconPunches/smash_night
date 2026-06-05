@@ -42,17 +42,65 @@ def _bootstrap_deps():
     except Exception:
         missing.append("PyOpenGL>=3.1.7")
     if missing:
+        # Guard against an infinite re-exec loop when an optional package has no
+        # installable distribution for this Python (e.g. ssbh_data_py has no
+        # wheel for 3.13+). We attempt the install once; if it fails we continue
+        # anyway — the 3D-preview features degrade gracefully without these.
+        if os.environ.get("SMASH_NIGHT_BOOTSTRAPPED"):
+            return
+        os.environ["SMASH_NIGHT_BOOTSTRAPPED"] = "1"
+        if sys.version_info >= (3, 13) and "ssbh_data_py" in missing:
+            print("[Smash Night] Python %d.%d detected — ssbh_data_py has no "
+                  "wheels past 3.12, so 3D previews and the slot picker's "
+                  "thumbnails will be degraded.\n"
+                  "  Run setup.bat to install Python 3.12 and rebuild .venv "
+                  "automatically." % sys.version_info[:2], file=sys.stderr)
         req = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "requirements.txt")
-        if os.path.isfile(req):
-            print(f"[Smash Night] Installing missing packages: {', '.join(missing)}")
-            subprocess.check_call([sys.executable, "-m", "pip", "install",
-                                    "-r", req, "--quiet"])
-        else:
-            print(f"[Smash Night] Installing missing packages: {', '.join(missing)}")
-            subprocess.check_call([sys.executable, "-m", "pip", "install",
-                                    "--quiet"] + missing)
-        # Re-exec so the new packages are importable in this process
+        print(f"[Smash Night] Installing missing packages: {', '.join(missing)}")
+        installed_any = False
+        try:
+            if os.path.isfile(req):
+                subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                        "-r", req, "--quiet"])
+            else:
+                subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                        "--quiet"]
+                                      + [p for p in missing if p != "pyrender"])
+            installed_any = True
+        except subprocess.CalledProcessError:
+            # Bulk install failed (one bad package poisons the whole pip
+            # transaction — e.g. ssbh_data_py on a too-new Python). Fall back
+            # to one-by-one so the core packages (requests, Pillow, rarfile…)
+            # still make it in and the app can run.
+            print("[Smash Night] Bulk install failed; retrying packages "
+                  "individually…", file=sys.stderr)
+            for pkg in missing:
+                if pkg == "pyrender":
+                    continue  # handled below with --no-deps
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip",
+                                            "install", "--quiet", pkg])
+                    installed_any = True
+                except subprocess.CalledProcessError:
+                    print(f"[Smash Night]   could not install {pkg}; "
+                          "continuing without it.", file=sys.stderr)
+        # pyrender hard-pins PyOpenGL==3.1.0, which modern pip refuses to
+        # resolve against our >=3.1.7 override (3.1.0 has a ctypes bug on
+        # Python 3.11+ that breaks OffscreenRenderer). Install it without
+        # deps — its real dependencies ship in requirements.txt.
+        if importlib.util.find_spec("pyrender") is None:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                        "--quiet", "--no-deps",
+                                        "pyrender>=0.1.45"])
+                installed_any = True
+            except subprocess.CalledProcessError:
+                print("[Smash Night] could not install pyrender; 3D previews "
+                      "may be unavailable.", file=sys.stderr)
+        if not installed_any:
+            return  # nothing new installed — keep running in this process
+        # Re-exec so any newly-installed packages are importable in this process
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
@@ -113,8 +161,55 @@ def _bootstrap_ssbh_render():
     threading.Thread(target=_build, daemon=True).start()
 
 
+def _bootstrap_unrar():
+    """Make sure a RAR extractor exists (many GameBanana mods ship as .rar).
+
+    The ``rarfile`` package only orchestrates — it needs a real ``UnRAR.exe``.
+    Without one it can silently fall back to bsdtar, which "extracts" RAR5
+    archives as empty directory husks. If no tool is found, kick off a silent
+    ``winget install RARLab.WinRAR`` on a daemon thread so a fresh PC
+    self-heals on first launch (may show one UAC prompt).
+    """
+    import os, shutil, subprocess, sys, threading
+
+    if any(os.path.isfile(p) for p in (
+            r"C:\Program Files\WinRAR\UnRAR.exe",
+            r"C:\Program Files (x86)\WinRAR\UnRAR.exe")) \
+            or shutil.which("unrar"):
+        return  # extractor available, nothing to do
+
+    winget = shutil.which("winget")
+    if not winget:
+        print("[Smash Night] No RAR extractor found and winget is "
+              "unavailable — .rar mods will fail to extract until WinRAR "
+              "is installed.", file=sys.stderr)
+        return
+
+    def _install():
+        print("[Smash Night] Installing WinRAR in background "
+              "(needed to extract .rar mods)…")
+        try:
+            result = subprocess.run(
+                [winget, "install", "--id", "RARLab.WinRAR", "--silent",
+                 "--accept-package-agreements", "--accept-source-agreements"],
+                capture_output=True, text=True, timeout=600)
+            if result.returncode == 0:
+                print("[Smash Night] WinRAR installed — .rar mods will "
+                      "extract correctly.")
+            else:
+                print("[Smash Night] WinRAR auto-install failed "
+                      f"(code {result.returncode}). Install it manually: "
+                      "winget install RARLab.WinRAR", file=sys.stderr)
+        except Exception as e:
+            print(f"[Smash Night] WinRAR auto-install error: {e}",
+                  file=sys.stderr)
+
+    threading.Thread(target=_install, daemon=True).start()
+
+
 _bootstrap_deps()
 _bootstrap_ssbh_render()
+_bootstrap_unrar()
 # ─────────────────────────────────────────────────────────────────────────────
 
 import io
@@ -2985,37 +3080,66 @@ def extract_archive(filepath, dest_dir):
     pre_count = sum(len(fs) for _, _, fs in os.walk(dest_dir)) \
         if os.path.isdir(dest_dir) else 0
     ext = os.path.splitext(filepath)[1].lower()
-    if ext == ".zip":
-        with zipfile.ZipFile(filepath, "r") as zf:
-            zf.extractall(dest_dir)
-    elif ext == ".7z":
-        if HAS_PY7ZR:
-            import py7zr as _p
-            with _p.SevenZipFile(filepath, mode="r") as z:
-                z.extractall(dest_dir)
-        else:
-            raise RuntimeError("py7zr not installed (pip install py7zr)")
-    elif ext == ".rar":
-        if HAS_RARFILE:
+    try:
+        if ext == ".zip":
+            with zipfile.ZipFile(filepath, "r") as zf:
+                zf.extractall(dest_dir)
+        elif ext == ".7z":
+            if HAS_PY7ZR:
+                import py7zr as _p
+                with _p.SevenZipFile(filepath, mode="r") as z:
+                    z.extractall(dest_dir)
+            else:
+                raise RuntimeError("py7zr not installed (pip install py7zr)")
+        elif ext == ".rar":
+            if not HAS_RARFILE:
+                raise RuntimeError(
+                    "rarfile not installed (pip install rarfile)")
             unrar_paths = [r"C:\Program Files\WinRAR\UnRAR.exe",
                            r"C:\Program Files (x86)\WinRAR\UnRAR.exe"]
-            for p in unrar_paths:
-                if os.path.exists(p):
-                    rarfile.UNRAR_TOOL = p
-                    break
+            unrar = next((p for p in unrar_paths if os.path.exists(p)), None)
+            if unrar:
+                rarfile.UNRAR_TOOL = unrar
+            elif not shutil.which("unrar"):
+                # Without a real unrar, rarfile silently falls back to
+                # bsdtar, which "extracts" RAR5 archives as empty directory
+                # husks. Fail loudly instead — the startup bootstrap
+                # auto-installs WinRAR, so this usually means it's still
+                # in flight or was declined.
+                raise RuntimeError(
+                    "No RAR extractor found for "
+                    f"'{os.path.basename(filepath)}'.\n"
+                    "Install WinRAR (winget install RARLab.WinRAR) and "
+                    "retry — Smash Night also attempts this automatically "
+                    "at startup.")
             with rarfile.RarFile(filepath, "r") as rf:
                 rf.extractall(dest_dir)
         else:
-            raise RuntimeError("rarfile not installed (pip install rarfile)")
-    else:
-        raise RuntimeError(f"Unknown archive format: {ext}")
-    # Catch silent failures — extraction "succeeded" but produced
-    # nothing useful.
-    post_count = sum(len(fs) for _, _, fs in os.walk(dest_dir))
-    if post_count <= pre_count:
-        raise RuntimeError(
-            f"Archive '{os.path.basename(filepath)}' extracted but "
-            "produced no new files (corrupt / encrypted / empty?)")
+            raise RuntimeError(f"Unknown archive format: {ext}")
+        # Catch silent failures — extraction "succeeded" but produced
+        # nothing useful.
+        post_count = sum(len(fs) for _, _, fs in os.walk(dest_dir))
+        if post_count <= pre_count:
+            raise RuntimeError(
+                f"Archive '{os.path.basename(filepath)}' extracted but "
+                "produced no new files (corrupt / encrypted / empty?)")
+    except Exception:
+        # Don't leave a half-written tree behind: callers treat a non-empty
+        # dest_dir as a valid extraction cache, so an empty/partial husk
+        # would poison every future install of this mod.
+        if pre_count == 0:
+            shutil.rmtree(dest_dir, ignore_errors=True)
+        raise
+
+
+def _extracted_cache_ok(extracted_dir):
+    """True if a ``.mod_cache/<id>/extracted`` tree holds at least one real
+    file. A bare ``os.listdir()`` check is not enough: a failed RAR
+    extraction can leave behind a skeleton of empty directories, which
+    must be treated as a cache miss (re-download + re-extract)."""
+    if not os.path.isdir(extracted_dir):
+        return False
+    return any(fs for _r, _ds, fs in os.walk(extracted_dir))
 
 
 # ─────────────────────────────────────────────────────────
@@ -10171,7 +10295,7 @@ class GameBananaBrowser:
         for m in mods:
             extracted = os.path.join(MOD_CACHE_DIR,
                                       str(m["mod_id"]), "extracted")
-            if os.path.isdir(extracted) and os.listdir(extracted):
+            if _extracted_cache_ok(extracted):
                 cached += 1
         missing = len(mods) - cached
         if missing == 0:
@@ -10205,7 +10329,7 @@ class GameBananaBrowser:
                     name = m.get("name") or f"Mod {mid}"
                     extracted = os.path.join(
                         MOD_CACHE_DIR, str(mid), "extracted")
-                    if os.path.isdir(extracted) and os.listdir(extracted):
+                    if _extracted_cache_ok(extracted):
                         prog.set_phase(
                             f"[{i}/{len(mods)}] {name} (cached)")
                         ok += 1
@@ -10616,7 +10740,7 @@ class GameBananaBrowser:
 
             print(f"  Verifying {name} (id={mid})…")
             try:
-                if not os.path.isdir(extracted) or not os.listdir(extracted):
+                if not _extracted_cache_ok(extracted):
                     os.makedirs(extracted, exist_ok=True)
                     archive = self._download_mod_archive(mid, name)
                     if not archive:
@@ -11514,7 +11638,7 @@ class GameBananaBrowser:
         cache_dir = os.path.join(MOD_CACHE_DIR, str(mod_id))
         extracted = os.path.join(cache_dir, "extracted")
 
-        if os.path.isdir(extracted) and os.listdir(extracted):
+        if _extracted_cache_ok(extracted):
             # Cached — open immediately.
             self._open_install_for_extracted(extracted, mod_name,
                                               mod_id=mod_id,
@@ -12107,7 +12231,7 @@ class GameBananaBrowser:
             try:
                 cache_dir = os.path.join(MOD_CACHE_DIR, str(mod_id))
                 extracted = os.path.join(cache_dir, "extracted")
-                if not os.path.isdir(extracted) or not os.listdir(extracted):
+                if not _extracted_cache_ok(extracted):
                     print(f"  [auto-preview] downloading '{mod_name}'…")
                     archive = self._download_mod_archive(mod_id, mod_name)
                     if not archive:
@@ -13424,7 +13548,7 @@ class GameBananaBrowser:
             if not mid:
                 continue
             ext = os.path.join(MOD_CACHE_DIR, str(mid), "extracted")
-            if os.path.isdir(ext) and os.listdir(ext):
+            if _extracted_cache_ok(ext):
                 cached += 1
             else:
                 uncached_mods.append(m)
@@ -13628,7 +13752,7 @@ class GameBananaBrowser:
                 continue
             cache_dir = os.path.join(MOD_CACHE_DIR, str(mid))
             extracted = os.path.join(cache_dir, "extracted")
-            if not (os.path.isdir(extracted) and os.listdir(extracted)):
+            if not _extracted_cache_ok(extracted):
                 continue
             try:
                 stripped_any = False

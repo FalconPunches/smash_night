@@ -10,10 +10,10 @@ The entire app lives in one file: `smash_night.py` (~13k lines).
 
 ## Run / develop
 
-- Launch normally: `.venv\Scripts\pythonw.exe smash_night.py`
+- Launch normally: double-click `Run.bat` (auto-runs `setup.bat` if `.venv` is missing or built on an unsupported Python), or `.venv\Scripts\pythonw.exe smash_night.py` directly.
 - Launch as admin (required for RCM payload injection on systems with UAC fully disabled): double-click `Run_As_Admin.bat`
 - There is no test suite, no linter config, no build step. `_test_search.py` is a one-off API probe (and currently imports a stale `gamebanana_browser` module name — broken, do not rely on it).
-- The `.venv` checked in here points at `C:\Users\carobins\...` — it's stale on a fresh checkout. Recreate with `python -m venv .venv` and install `requests`, `Pillow`, optionally `py7zr`, `rarfile`, and (for 3D preview) `numpy`, `ssbh_data_py`, `trimesh`, `pyrender`.
+- **Python must be 3.10–3.12** — `ssbh_data_py` ships no wheels past 3.12, and without it the 3D stack dies and skin installs skip the slot picker (falling back to SSBH Editor). `setup.bat` enforces this: it finds (or winget-installs) Python 3.12, recreates `.venv` if it's on a too-new Python, installs `requirements.txt`, then installs `pyrender` with `--no-deps` (it hard-pins `PyOpenGL==3.1.0`, which modern pip refuses to resolve against the `>=3.1.7` override — never put pyrender back into requirements.txt), and winget-installs WinRAR if no UnRAR is present (`.rar` mods extract as empty husks without it). The in-app `_bootstrap_deps()` / `_bootstrap_unrar()` mirror most of this for people who launch the .py directly.
 - `fix_profiles.py` is a one-shot codemod that was run once to inject behavior into `smash_night.py`. It hardcodes a path under `c:\Users\gvopa\...` and is not meant to be re-run. Treat it as historical.
 
 ## Big picture
