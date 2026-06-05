@@ -3767,7 +3767,12 @@ def install_to_sd(archive_path, mod_name, metadata=None, target_slot=None,
         # Apply slot mapping if provided
         if slot_map:
             _apply_slot_map(mod_path, slot_map)
-            slot_label = ",".join(f"{s}->{t}" for s, t in slot_map.items())
+            print("  Slot mapping applied: "
+                  + ", ".join(f"{s}->{t}" for s, t in slot_map.items()))
+            # Record only the TARGET slots the mod now occupies. The old
+            # "src->tgt" label leaked into profiles and came back around
+            # as a literal path component (WinError 123).
+            slot_label = ", ".join(sorted(set(slot_map.values())))
         elif target_slot and src_slots:
             # Single target: if 1 source slot, just remap
             if len(src_slots) == 1:
@@ -6714,6 +6719,29 @@ def is_favorite(mod_id):
 #  MOD PROFILES (curated collections of mods)
 # ─────────────────────────────────────────────────────────
 
+def _normalize_slot_value(slot_value):
+    """Collapse a profile/meta ``slot`` field to clean ``cXX`` token(s).
+
+    Historically ``install_to_sd`` stored the *display label* of a slot
+    mapping ("c00->c03", or "c00->c03,c01->c05") in ``.gb_meta.json``,
+    and profile entries copied it verbatim. Feeding that back into the
+    install pipeline as a target slot put a literal ``->`` in a Windows
+    path → WinError 123. Arrow pairs collapse to their TARGET slot;
+    everything else is filtered to valid ``cXX`` tokens. Returns e.g.
+    "c03" / "c03, c05" / None.
+    """
+    if not slot_value:
+        return None
+    out = []
+    for part in str(slot_value).lower().replace(";", ",").split(","):
+        part = part.strip()
+        if "->" in part:
+            part = part.split("->")[-1].strip()
+        if re.match(r"^c\d{2}$", part) and part not in out:
+            out.append(part)
+    return ", ".join(out) if out else None
+
+
 def load_profiles():
     """Load all saved mod profiles. Returns dict: profile_name -> profile_data."""
     # Migrate legacy gb_sets.json if it exists and gb_profiles.json does not
@@ -6726,7 +6754,14 @@ def load_profiles():
     if os.path.exists(PROFILES_FILE):
         try:
             with open(PROFILES_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                profiles = json.load(f)
+            # Heal legacy arrow-label slot fields (see _normalize_slot_value).
+            for prof in profiles.values():
+                for m in (prof.get("mods") or []):
+                    raw = m.get("slot")
+                    if raw and "->" in str(raw):
+                        m["slot"] = _normalize_slot_value(raw)
+            return profiles
         except Exception:
             pass
     return {}
@@ -6785,7 +6820,9 @@ def create_profile_from_installed(profile_name):
             "folder_name": skin["name"],
             "mod_id": meta.get("mod_id"),
             "name": meta.get("name", skin["name"]),
-            "slot": meta.get("slot"),
+            # Normalize: old .gb_meta.json files on the SD may still
+            # carry "src->tgt" display labels in their slot field.
+            "slot": _normalize_slot_value(meta.get("slot")),
             "character": skin.get("character", "Other"),
             "mod_type": skin.get("mod_type", "skin"),
             "thumb_url": meta.get("thumb_url"),
@@ -9959,7 +9996,7 @@ class GameBananaBrowser:
                         "folder_name": skin["name"],
                         "mod_id": meta.get("mod_id"),
                         "name": meta.get("name", skin["name"]),
-                        "slot": meta.get("slot"),
+                        "slot": _normalize_slot_value(meta.get("slot")),
                         "character": skin.get("character", "Other"),
                         "mod_type": skin.get("mod_type", "skin"),
                         "thumb_url": meta.get("thumb_url"),
@@ -14155,7 +14192,9 @@ class GameBananaBrowser:
         for i, mod in enumerate(install_queue, 1):
             mod_id = mod["mod_id"]
             mod_name = mod.get("name", f"Mod {mod_id}")
-            slot = mod.get("slot")
+            # Normalize: legacy entries stored "c00->c03" display labels,
+            # which must never reach the install pipeline as a path part.
+            slot = _normalize_slot_value(mod.get("slot"))
             # If this entry was created by the drag-and-drop Install
             # dialog, ``source_slot`` records *which* of the mod's
             # variants the user picked. Build an explicit slot_map so
