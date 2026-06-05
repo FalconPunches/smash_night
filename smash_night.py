@@ -406,12 +406,35 @@ def _present_sd_drives():
     return drives
 
 def _detect_sd_drive():
-    """Return the first removable drive, preferring the order in SD_CANDIDATES."""
+    """Pick the most plausible Switch SD from the present candidates.
+
+    Ranking (best first):
+      1. removable drive WITH Switch CFW markers
+      2. removable drive (blank / freshly formatted card)
+      3. fixed drive with markers — internal SD readers report 'fixed',
+         but this also matches an internal disk that a previous
+         misdirected install left Switch folders on, which is exactly
+         why removable drives must always outrank it.
+    SD_CANDIDATES order only breaks ties within the same rank.
+    """
     present = _present_sd_drives()
-    for c in SD_CANDIDATES:
-        if c in present:
-            return c
-    return present[0] if present else SD_CANDIDATES[0]
+    if not present:
+        return SD_CANDIDATES[0]
+
+    def rank(d):
+        removable = _is_removable_drive(d)
+        markers = _looks_like_switch_sd(d)
+        if removable and markers:
+            r = 0
+        elif removable:
+            r = 1
+        else:
+            r = 2
+        order = (SD_CANDIDATES.index(d) if d in SD_CANDIDATES
+                 else len(SD_CANDIDATES))
+        return (r, order, d)
+
+    return min(present, key=rank)
 
 # Initialise with the detected drive (or first candidate as fallback).
 SD_CARD = _detect_sd_drive()
@@ -443,9 +466,23 @@ PAYLOAD_SEARCH_PATHS = [
     os.path.join(SD_CARD, "atmosphere", "reboot_payload.bin"),
 ]
 
-def _apply_sd_drive(drive):
-    """Update all SD-card-derived module globals when the active drive changes."""
+# When True the user explicitly chose SD_CARD (startup multi-drive prompt
+# or the top-right Drive selector) — the 2-second SD poll must NOT
+# auto-switch away from it (it used to stomp manual picks within 2s).
+SD_DRIVE_PINNED = False
+
+
+def _apply_sd_drive(drive, pin=None):
+    """Update all SD-card-derived module globals when the active drive changes.
+
+    pin=True  → user explicitly chose this drive; auto-detect is disabled.
+    pin=False → back to auto-detect.
+    pin=None  → leave the pinned flag as-is (poll/auto callers).
+    """
     global SD_CARD, ARCROPOLIS_MODS, ATMOSPHERE_CONTENTS, PLUGINS_DIR, EXEFS_DIR, ROMFS_DIR
+    global SD_DRIVE_PINNED
+    if pin is not None:
+        SD_DRIVE_PINNED = pin
     SD_CARD = drive
     ARCROPOLIS_MODS = os.path.join(drive, "ultimate", "mods")
     ATMOSPHERE_CONTENTS = os.path.join(drive, "atmosphere", "contents", SMASH_TITLE_ID)
@@ -7624,9 +7661,20 @@ class GameBananaBrowser:
         self.sd_label = tk.Label(sd_block, text="",
                                   font=(T.FONT, T.SZ_MD), bg="#000000")
         self.sd_label.pack(anchor="e")
-        # Action row under the SD label: Diagnose + Eject.
+        # Action row under the SD label: Drive selector + Diagnose + Eject.
         sd_btn_row = tk.Frame(sd_block, bg="#000000")
         sd_btn_row.pack(anchor="e", pady=(2, 0))
+        # Drive selector — lets the user pick which drive letter is the
+        # Switch SD when auto-detection grabs the wrong one (e.g. a PC
+        # with a permanent E: card reader). Picking a drive pins it so
+        # the 2-second SD poll can't switch away.
+        self.drive_btn = tk.Button(
+            sd_btn_row, text="💾 Drive ▾", width=10,
+            bg=T.SURFACE1, fg=T.FG,
+            font=(T.FONT, T.SZ_SM, "bold"),
+            relief="flat", cursor="hand2",
+            command=self._show_drive_menu)
+        self.drive_btn.pack(side="left", padx=(0, 4))
         # Diagnose: parse every cXX slot folder on the SD with
         # ssbh_data_py and report missing textures, broken meshes,
         # skeleton issues — the kinds of failures that cause "no
@@ -7958,12 +8006,64 @@ class GameBananaBrowser:
         sys.stdout = TextRedirector(self.log, "stdout")
         sys.stderr = TextRedirector(self.log, "stderr")
 
+    def _show_drive_menu(self):
+        """Dropdown under the top-right Drive button: every present
+        drive (minus C:) with hints about which looks like the Switch
+        SD, plus an Auto-detect entry to go back to detection."""
+        menu = tk.Menu(self.root, tearoff=0, bg=T.SURFACE, fg=T.FG,
+                       activebackground=T.SURFACE1, activeforeground=T.FG,
+                       font=(T.FONT, T.SZ_SM))
+        for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+            p = f"{letter}:\\"
+            try:
+                if not os.path.exists(p):
+                    continue
+            except Exception:
+                continue
+            tags = []
+            if _looks_like_switch_sd(p):
+                tags.append("Switch files")
+            if _is_removable_drive(p):
+                tags.append("removable")
+            label = f"{p}  ({', '.join(tags)})" if tags else p
+            if p == SD_CARD:
+                label = "✓ " + label
+            menu.add_command(label=label,
+                             command=lambda d=p: self._select_sd_drive(d))
+        menu.add_separator()
+        auto_label = "Auto-detect"
+        if not SD_DRIVE_PINNED:
+            auto_label = "✓ " + auto_label
+        menu.add_command(label=auto_label,
+                         command=lambda: self._select_sd_drive(None))
+        x = self.drive_btn.winfo_rootx()
+        y = self.drive_btn.winfo_rooty() + self.drive_btn.winfo_height()
+        menu.tk_popup(x, y)
+
+    def _select_sd_drive(self, drive):
+        """Apply a manual drive choice (or None = back to auto-detect),
+        refresh the SD status label and re-render the active view."""
+        if drive is None:
+            _apply_sd_drive(_detect_sd_drive(), pin=False)
+            print(f"  [Drive] Auto-detect → {SD_CARD}")
+        else:
+            _apply_sd_drive(drive, pin=True)
+            print(f"  [Drive] Using {SD_CARD} (pinned — auto-detect off)")
+        self._check_sd()
+        if self._active_view == "setup":
+            self._show_setup()
+        else:
+            self._refresh_current_view()
+
     def _check_sd(self):
         connected = os.path.exists(SD_CARD) and os.path.isdir(SD_CARD)
+        pin = " 📌" if SD_DRIVE_PINNED else ""
         if connected:
-            self.sd_label.configure(text=f"SD ({SD_CARD}) Connected", fg=T.GREEN)
+            self.sd_label.configure(
+                text=f"SD ({SD_CARD}) Connected{pin}", fg=T.GREEN)
         else:
-            self.sd_label.configure(text=f"SD ({SD_CARD}) Not found", fg=T.RED)
+            self.sd_label.configure(
+                text=f"SD ({SD_CARD}) Not found{pin}", fg=T.RED)
         # Toggle the Eject + Diagnose buttons so they only fire when
         # there's actually a connected volume to inspect / dismount.
         try:
@@ -14496,7 +14596,8 @@ class GameBananaBrowser:
     def _start_sd_poll(self):
         """Begin polling for SD card insertion/removal every 2 seconds."""
         self._stop_sd_poll()  # cancel any existing timer first
-        _apply_sd_drive(_detect_sd_drive())
+        if not SD_DRIVE_PINNED:
+            _apply_sd_drive(_detect_sd_drive())
         self._sd_present = os.path.exists(SD_CARD)
         self._poll_sd_card()
 
@@ -14508,7 +14609,9 @@ class GameBananaBrowser:
 
     def _poll_sd_card(self):
         """Check if SD card state changed (or drive letter swapped); auto-refresh Setup tab if so."""
-        detected = _detect_sd_drive()
+        # When the user pinned a drive via the top-right selector, only
+        # track its presence — never auto-switch to a different letter.
+        detected = SD_CARD if SD_DRIVE_PINNED else _detect_sd_drive()
         now_present = os.path.exists(detected)
         drive_changed = now_present and (detected != SD_CARD)
         if now_present != self._sd_present or drive_changed:
@@ -19658,7 +19761,9 @@ def main():
     drives = _present_sd_drives()
     if len(drives) > 1:
         picked = _ask_sd_drive(drives)
-        _apply_sd_drive(picked)
+        # pin=True: the user chose this drive — don't let the SD poll
+        # auto-switch back to whatever _detect_sd_drive() prefers.
+        _apply_sd_drive(picked, pin=True)
 
     app = GameBananaBrowser(root)
     root.mainloop()
