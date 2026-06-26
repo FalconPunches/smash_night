@@ -44,6 +44,11 @@ gb_audit_cache.json
 gb_touched_cache.json
 gb_sets.json
 
+# ── Secrets ─────────────────────────────────────────────
+# Personal GitHub token (raises API rate limit 60→5000/hr).
+# Never commit a real token.
+github_token.txt
+
 # ── Switch SD provisioning downloads ────────────────────
 switch_setup/downloads/
 

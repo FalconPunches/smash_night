@@ -1,0 +1,21 @@
+# Smash Night — optional GitHub API token
+#
+# WHY: GitHub's API allows only 60 requests/hour for anonymous users
+# (per IP). One full SD provision can use most of that, so provisioning
+# a second Switch on the same PC within an hour fails with
+# "Could not find release on GitHub" — even though nothing is wrong with
+# the Switch or SD card. A personal access token raises the limit to
+# 5,000 requests/hour and makes this go away.
+#
+# HOW:
+#   1. Go to https://github.com/settings/tokens?type=beta
+#      (Fine-grained token; no scopes/permissions needed — public read).
+#      Classic tokens work too; leave all scopes unchecked.
+#   2. Generate it and copy the value (starts with github_pat_ or ghp_).
+#   3. Copy this file to  github_token.txt  (drop the .example) and
+#      replace the line below with just your token.
+#
+# Lines starting with '#' and blank lines are ignored.
+# You can also set the GITHUB_TOKEN environment variable instead.
+
+PASTE_YOUR_TOKEN_HERE

@@ -2952,6 +2952,121 @@ def render_model_preview(model_dir, width=320, height=240):
     return img
 
 
+class GitHubRateLimitError(Exception):
+    """Raised when the GitHub API rejects a request because the hourly
+    rate limit is exhausted (HTTP 403/429 with X-RateLimit-Remaining: 0).
+    Distinct from a genuine 404 so callers can tell 'too many requests'
+    apart from 'release not found'."""
+
+    def __init__(self, reset_epoch=0):
+        self.reset_epoch = reset_epoch
+        super().__init__("GitHub API rate limit reached")
+
+
+# Set whenever a GitHub API call is refused for rate-limiting, so the
+# UI can explain the real reason instead of "Could not find release".
+# Cleared at the start of each provision / version-check run.
+_GITHUB_RATE_LIMIT = {"hit": False, "reset": 0}
+
+# Last non-rate-limit failure from a GitHub API call (connection error,
+# unexpected HTTP status, etc.). Surfaced so a silent failure shows its
+# real cause instead of a bare "Could not find release".
+_GITHUB_LAST_ERROR = {"msg": ""}
+
+
+def _record_github_error(exc):
+    """Store a concise description of a failed GitHub call for the UI."""
+    try:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        prefix = f"HTTP {status}: " if status else ""
+        msg = f"{type(exc).__name__}: {exc}"
+        _GITHUB_LAST_ERROR["msg"] = (prefix + msg)[:300]
+    except Exception:
+        _GITHUB_LAST_ERROR["msg"] = type(exc).__name__
+
+
+def _github_token():
+    """Return a GitHub personal access token if the user supplied one.
+
+    Unauthenticated GitHub API access is capped at 60 requests/hour per
+    IP — a single full provision can exhaust that, after which every
+    lookup 403s and looks like 'release not found'. A token raises the
+    cap to 5,000/hour. Sources, in order: GITHUB_TOKEN / GH_TOKEN env
+    vars, then a ``github_token.txt`` file next to the script."""
+    for var in ("GITHUB_TOKEN", "GH_TOKEN"):
+        tok = os.environ.get(var)
+        if tok and tok.strip():
+            return tok.strip()
+    try:
+        path = os.path.join(SCRIPT_DIR, "github_token.txt")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                tok = f.read().strip()
+            # Ignore comment lines so the file can ship with instructions.
+            tok = "\n".join(l for l in tok.splitlines()
+                             if l.strip() and not l.strip().startswith("#")).strip()
+            if tok and tok != "PASTE_YOUR_TOKEN_HERE":
+                return tok
+    except Exception:
+        pass
+    return None
+
+
+def _github_headers():
+    h = {"Accept": "application/vnd.github+json",
+         "User-Agent": "SmashNight"}
+    tok = _github_token()
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
+    return h
+
+
+def _github_api_get(url, timeout=30):
+    """GET a GitHub *API* URL with auth headers and rate-limit detection.
+
+    Returns the ``requests.Response`` on success. Raises
+    :class:`GitHubRateLimitError` (and records it in ``_GITHUB_RATE_LIMIT``)
+    when the request is refused for rate-limiting, so it is never
+    confused with a real 404. Other HTTP errors raise as usual."""
+    resp = requests.get(url, headers=_github_headers(),
+                        verify=False, timeout=timeout)
+    if resp.status_code in (403, 429):
+        remaining = resp.headers.get("X-RateLimit-Remaining")
+        body = (resp.text or "").lower()
+        if remaining == "0" or "rate limit" in body or "secondary rate" in body:
+            try:
+                reset = int(resp.headers.get("X-RateLimit-Reset", "0"))
+            except (TypeError, ValueError):
+                reset = 0
+            _GITHUB_RATE_LIMIT["hit"] = True
+            _GITHUB_RATE_LIMIT["reset"] = reset
+            raise GitHubRateLimitError(reset)
+    resp.raise_for_status()
+    return resp
+
+
+def _github_rate_limit_note():
+    """Human-readable suffix explaining why a GitHub call failed: a
+    rate-limit message if we hit the cap, otherwise the real underlying
+    error (connection refused, DNS, unexpected HTTP status, …) so a
+    silent failure isn't mistaken for 'release not found'."""
+    if not _GITHUB_RATE_LIMIT["hit"]:
+        err = _GITHUB_LAST_ERROR.get("msg", "")
+        return f"  — {err}" if err else ""
+    reset = _GITHUB_RATE_LIMIT.get("reset", 0)
+    when = ""
+    if reset:
+        try:
+            mins = max(0, int((reset - time.time()) / 60) + 1)
+            when = f" (resets in ~{mins} min)"
+        except Exception:
+            when = ""
+    authed = " — add a GitHub token to lift the 60/hr cap to 5,000/hr" \
+        if not _github_token() else ""
+    return (f"  — GitHub API rate limit reached{when}{authed}. "
+            "See github_token.txt.example.")
+
+
 def github_latest_asset(repo, asset_filter):
     """Get the latest release asset from GitHub matching asset_filter(name)->bool.
     Returns dict with version, url, filename, size, published — or None."""
@@ -2959,8 +3074,7 @@ def github_latest_asset(repo, asset_filter):
         return None
     try:
         url = f"https://api.github.com/repos/{repo}/releases/latest"
-        resp = requests.get(url, verify=False, timeout=30)
-        resp.raise_for_status()
+        resp = _github_api_get(url)
         data = resp.json()
         body = data.get("body", "") or ""
         for asset in data.get("assets", []):
@@ -2973,8 +3087,10 @@ def github_latest_asset(repo, asset_filter):
                     "published": data.get("published_at", ""),
                     "body": body,
                 }
-    except Exception:
+    except GitHubRateLimitError:
         pass
+    except Exception as e:
+        _record_github_error(e)
     return None
 
 
@@ -2995,8 +3111,7 @@ def github_prerelease_asset(repo, asset_filter):
         return None
     try:
         url = f"https://api.github.com/repos/{repo}/releases?per_page=15"
-        resp = requests.get(url, verify=False, timeout=30)
-        resp.raise_for_status()
+        resp = _github_api_get(url)
         for release in resp.json():
             if not release.get("prerelease") and not release.get("draft"):
                 continue  # skip stable releases
@@ -3012,8 +3127,10 @@ def github_prerelease_asset(repo, asset_filter):
                         "body": body,
                         "prerelease": True,
                     }
-    except Exception:
+    except GitHubRateLimitError:
         pass
+    except Exception as e:
+        _record_github_error(e)
     return None
 
 
@@ -3026,8 +3143,7 @@ def github_branch_asset(repo, branch, asset_filter):
     # Strategy 1: check for pre-releases whose tag or target matches the branch
     try:
         url = f"https://api.github.com/repos/{repo}/releases?per_page=30"
-        resp = requests.get(url, verify=False, timeout=30)
-        resp.raise_for_status()
+        resp = _github_api_get(url)
         for release in resp.json():
             commitish = release.get("target_commitish", "")
             tag = release.get("tag_name", "")
@@ -3046,8 +3162,10 @@ def github_branch_asset(repo, branch, asset_filter):
                         "prerelease": True,
                         "branch": branch,
                     }
-    except Exception:
+    except GitHubRateLimitError:
         pass
+    except Exception as e:
+        _record_github_error(e)
     return None
 
 
@@ -14835,12 +14953,29 @@ class GameBananaBrowser:
     def _do_setup_fetch_github(self):
         """Background: fetch latest GitHub info, then update Setup UI."""
         print("\n=== Fetching latest versions from GitHub… ===\n")
+        _GITHUB_RATE_LIMIT["hit"] = False  # fresh batch
+        _GITHUB_LAST_ERROR["msg"] = ""
+        if _github_token():
+            print("    (using GitHub token — 5,000 req/hr)")
         latest = {}
         for key, (repo, filt) in GITHUB_REPOS.items():
             info = github_latest_asset(repo, filt)
             latest[key] = info
             tag = info["version"] if info else "?"
             print(f"    {key}: {tag}")
+
+        all_missing = all(v is None for v in latest.values()) if latest else False
+        if _GITHUB_RATE_LIMIT["hit"]:
+            print("\n  ⚠ GITHUB RATE LIMIT" + _github_rate_limit_note()
+                  + "\n    Releases couldn't be fetched — this is NOT a problem"
+                    " with the SD card or Switch.\n    Wait for the reset, or"
+                    " drop a token in github_token.txt, then re-run.")
+        elif all_missing and _GITHUB_LAST_ERROR.get("msg"):
+            print("\n  ⚠ COULD NOT REACH GITHUB" + _github_rate_limit_note()
+                  + "\n    Every release lookup failed with the same error —"
+                    " this is NOT a problem with the SD card or Switch."
+                    "\n    Likely no internet, a firewall/proxy, or a TLS"
+                    " issue on this PC. Fix connectivity and re-run.")
 
         # When unofficial mode is enabled, also check for unofficial Atmosphere
         if getattr(self, '_use_unofficial_atmo', False):
@@ -16672,7 +16807,7 @@ class GameBananaBrowser:
         print(f"    Downloading latest from GitHub ({repo})…")
         info = github_latest_asset(repo, filt)
         if not info:
-            print(f"    ✗ Could not find release on GitHub")
+            print(f"    ✗ Could not find release on GitHub{_github_rate_limit_note()}")
             return False
 
         if repo_key == "arcropolis":
@@ -16745,7 +16880,7 @@ class GameBananaBrowser:
             os.remove(tmp)
             print(f"    Skyline {info['version']} installed.")
         else:
-            print(f"    ✗ Could not find Skyline release on GitHub")
+            print(f"    ✗ Could not find Skyline release on GitHub{_github_rate_limit_note()}")
 
     def _update_atmosphere(self):
         """Download and deploy latest Atmosphere to SD card.
@@ -16799,7 +16934,7 @@ class GameBananaBrowser:
             info = github_latest_asset(repo, filt)
 
         if not info and not from_local:
-            print(f"    ✗ Could not find any Atmosphere build")
+            print(f"    ✗ Could not find any Atmosphere build{_github_rate_limit_note()}")
             if use_unofficial:
                 print(f"    ╭─────────────────────────────────────────────────────╮")
                 print(f"    │ No unofficial build available.  To get one:         │")
@@ -16903,7 +17038,7 @@ class GameBananaBrowser:
         repo, filt = GITHUB_REPOS["hekate"]
         info = github_latest_asset(repo, filt)
         if not info:
-            print(f"    ✗ Could not find Hekate release on GitHub")
+            print(f"    ✗ Could not find Hekate release on GitHub{_github_rate_limit_note()}")
             return False
         print(f"    Found {info['version']} ({info['filename']})")
 
@@ -16941,7 +17076,7 @@ class GameBananaBrowser:
         repo, filt = GITHUB_REPOS["sys_patch"]
         info = github_latest_asset(repo, filt)
         if not info:
-            print(f"    ✗ Could not find sys-patch release on GitHub")
+            print(f"    ✗ Could not find sys-patch release on GitHub{_github_rate_limit_note()}")
             return False
         print(f"    Found {info['version']} ({info['filename']})")
 
