@@ -3126,6 +3126,20 @@ def find_local_fusee_override():
     return None
 
 
+def _atmo_semver(info):
+    """Extract the underlying Atmosphere (major, minor, patch) from a resolved
+    asset dict.  Prefers the asset filename (atmosphere-X.Y.Z-...), since fork
+    tags like '22_support-8a7c2872c' carry no clean version; falls back to the
+    version string.  Returns (0, 0, 0) when nothing parses, so unknown builds
+    sort lowest.  A higher tuple = supports same-or-newer firmware."""
+    if isinstance(info, dict):
+        for key in ("filename", "version"):
+            m = re.search(r'(\d+)\.(\d+)\.(\d+)', info.get(key, "") or "")
+            if m:
+                return tuple(int(x) for x in m.groups())
+    return (0, 0, 0)
+
+
 # ─────────────────────────────────────────────────────────
 #  EXTRACT + INSTALL LOGIC
 # ─────────────────────────────────────────────────────────
@@ -16746,24 +16760,41 @@ class GameBananaBrowser:
         fusee_local = None
 
         if use_unofficial:
-            print(f"    Unofficial mode ON — checking alternative sources…")
+            # Auto-robust selection.  A higher Atmosphere version always supports
+            # the same-or-newer firmware, so compare the underlying X.Y.Z of the
+            # unofficial (support-branch) build against the latest official stable
+            # and deploy whichever is newer.  This self-heals the failure where
+            # official catches up and *surpasses* a now-stale fork build (e.g.
+            # official 1.11.2 supports 22.5.0 while the fork's 1.11.0-22_support
+            # build does not), and still prefers the fork while official lags.
+            print(f"    Auto Atmosphere — comparing unofficial vs official stable…")
             result, source = _resolve_unofficial_atmosphere(atmo_filter)
             if result and result.get("local"):
                 local_override = result
                 from_local = True
-                print(f"    Found {source}: {local_override['filename']} "
+                print(f"    Using local override: {local_override['filename']} "
                       f"({local_override['version']})")
-            elif result:
-                info = result
-                print(f"    Found {source}: {info['version']} ({info['filename']})")
             else:
-                print(f"    No unofficial build found — falling back to latest stable")
+                stable = github_latest_asset(*GITHUB_REPOS["atmosphere"])
+                cand = []
+                if stable:
+                    cand.append(("official stable", stable))   # first → wins ties
+                if result:
+                    cand.append((f"unofficial ({source})", result))
+                if cand:
+                    label, info = max(cand, key=lambda c: _atmo_semver(c[1]))
+                    print(f"    → Selected {label}: {info.get('version', '?')} "
+                          f"({info.get('filename', '?')})")
+                    for ol, oi in cand:
+                        if oi is not info:
+                            print(f"      skipped {ol} {oi.get('version', '?')} "
+                                  f"(older/equal Atmosphere version)")
 
             fusee_local = find_local_fusee_override()
 
         if not info and not from_local:
             if not use_unofficial:
-                print(f"    Downloading latest Atmosphere from GitHub…")
+                print(f"    Downloading latest stable Atmosphere from GitHub…")
             repo, filt = GITHUB_REPOS["atmosphere"]
             info = github_latest_asset(repo, filt)
 
@@ -16805,49 +16836,63 @@ class GameBananaBrowser:
             os.remove(tmp_zip)
             print(f"    ✓ Atmosphere {tag}{pre_tag} deployed to SD card.")
 
-        # Deploy fusee.bin
+        # Deploy fusee.bin.
+        # CRITICAL: the injected fusee payload must match the Atmosphere package
+        # we just deployed.  Every Atmosphere zip ships the matching payload at
+        # atmosphere/reboot_payload.bin — always prefer that.  Pairing a stale
+        # *stable* fusee with a *support-branch* Atmosphere (e.g. stable 1.11.2
+        # fusee against a 22_support build on FW 22.x) black-screens the console
+        # on inject, so we never fall back to the official stable fusee when a
+        # support-branch Atmosphere was deployed.
+        payloads_dir = os.path.join(SD_CARD, "bootloader", "payloads")
+        os.makedirs(payloads_dir, exist_ok=True)
+        fusee_dest = os.path.join(payloads_dir, "fusee.bin")
+        local_payloads = os.path.join(SCRIPT_DIR, "payloads")
+        os.makedirs(local_payloads, exist_ok=True)
+        reboot_payload = os.path.join(SD_CARD, "atmosphere", "reboot_payload.bin")
+
+        def _mirror_local_fusee():
+            try:
+                shutil.copy2(fusee_dest, os.path.join(local_payloads, "fusee.bin"))
+                print(f"    ✓ Local copy updated: payloads/fusee.bin")
+            except Exception as e:
+                print(f"    ⚠ Could not update local fusee.bin: {e}")
+
         if fusee_local:
-            payloads_dir = os.path.join(SD_CARD, "bootloader", "payloads")
-            os.makedirs(payloads_dir, exist_ok=True)
-            fusee_dest = os.path.join(payloads_dir, "fusee.bin")
             shutil.copy2(fusee_local, fusee_dest)
             sz = os.path.getsize(fusee_dest)
             print(f"    ✓ fusee.bin (local override) installed ({sz / 1024:.0f} KB)")
-            local_payloads = os.path.join(SCRIPT_DIR, "payloads")
-            os.makedirs(local_payloads, exist_ok=True)
-            try:
-                shutil.copy2(fusee_local, os.path.join(local_payloads, "fusee.bin"))
-            except Exception:
-                pass
+            _mirror_local_fusee()
+        elif os.path.isfile(reboot_payload):
+            # Guaranteed to match the Atmosphere we just laid down — no mismatch.
+            shutil.copy2(reboot_payload, fusee_dest)
+            sz = os.path.getsize(fusee_dest)
+            print(f"    ✓ fusee.bin from deployed Atmosphere "
+                  f"(reboot_payload.bin, version-matched) installed ({sz / 1024:.0f} KB)")
+            _mirror_local_fusee()
         else:
             fusee_info = None
             if use_unofficial:
                 result, _ = _resolve_unofficial_atmosphere(fusee_filter)
                 if result and not result.get("local"):
                     fusee_info = result
-            if not fusee_info:
+            # Only download the official stable fusee when we ALSO deployed
+            # official stable Atmosphere — never against a support-branch build.
+            if not fusee_info and not use_unofficial:
                 repo_f, filt_f = GITHUB_REPOS["fusee"]
                 fusee_info = github_latest_asset(repo_f, filt_f)
 
             if fusee_info:
-                payloads_dir = os.path.join(SD_CARD, "bootloader", "payloads")
-                os.makedirs(payloads_dir, exist_ok=True)
-                fusee_dest = os.path.join(payloads_dir, "fusee.bin")
                 download_file_to(fusee_info["url"], fusee_dest)
                 sz = os.path.getsize(fusee_dest)
                 pre_tag = " (pre-release)" if fusee_info.get("prerelease") else ""
                 print(f"    ✓ fusee.bin {fusee_info['version']}{pre_tag} installed ({sz / 1024:.0f} KB)")
-
-                local_payloads = os.path.join(SCRIPT_DIR, "payloads")
-                os.makedirs(local_payloads, exist_ok=True)
-                local_fusee = os.path.join(local_payloads, "fusee.bin")
-                try:
-                    shutil.copy2(fusee_dest, local_fusee)
-                    print(f"    ✓ Local copy updated: payloads/fusee.bin")
-                except Exception as e:
-                    print(f"    ⚠ Could not update local fusee.bin: {e}")
+                _mirror_local_fusee()
             else:
-                print(f"    ⚠ Could not download fusee.bin — you may need to get it manually")
+                print(f"    ⚠ No version-matched fusee.bin found for this Atmosphere build.")
+                print(f"    → Boot with Hekate instead: inject payloads/hekate_latest.bin,")
+                print(f"      then Launch → CFW.  Hekate chainloads the matching Atmosphere")
+                print(f"      and cannot mismatch like a standalone fusee can.")
 
         return True
 
