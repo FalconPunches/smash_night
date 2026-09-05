@@ -3578,6 +3578,94 @@ def arcropolis_required_smash_version(nro_path):
     return m.group(1).decode("ascii") if m else None
 
 
+# ARCropolis CI: every push to its default branch builds and uploads an
+# artifact named "arcropolis" whose zip holds
+#   arcropolis-package/atmosphere/contents/<title>/romfs/skyline/plugins/libarcropolis.nro
+# Gotcha: the repo's default branch is `master`, not `main`.
+ARCROPOLIS_CI_ARTIFACT = "arcropolis"
+ARCROPOLIS_CI_BRANCH = "master"
+
+
+def github_latest_ci_artifact(repo, artifact_name, branch):
+    """Newest non-expired GitHub Actions artifact named ``artifact_name``
+    produced by a workflow run on ``branch``.
+
+    Returns dict with url, created_at, head_sha, run_id, size — or None.
+    Listing is fine anonymously; the *download* is not (see
+    :func:`download_github_artifact`)."""
+    if not HAS_REQUESTS:
+        return None
+    try:
+        url = (f"https://api.github.com/repos/{repo}/actions/artifacts"
+               f"?name={quote(artifact_name)}&per_page=50")
+        data = _github_api_get(url).json()
+    except GitHubRateLimitError:
+        return None
+    except Exception as e:
+        _record_github_error(e)
+        return None
+    best = None
+    for a in data.get("artifacts") or []:
+        if a.get("expired"):
+            continue
+        run = a.get("workflow_run") or {}
+        if run.get("head_branch") != branch:
+            continue
+        if best is None or (a.get("created_at") or "") > (best.get("created_at") or ""):
+            best = a
+    if not best:
+        return None
+    run = best.get("workflow_run") or {}
+    return {
+        "url": best.get("archive_download_url"),
+        "created_at": best.get("created_at") or "",
+        "head_sha": run.get("head_sha") or "",
+        "run_id": run.get("id"),
+        "size": best.get("size_in_bytes", 0),
+    }
+
+
+def download_github_artifact(url, dest):
+    """Download an Actions artifact zip to ``dest``.
+
+    GitHub refuses anonymous artifact downloads, so the token goes on
+    the first hop.  The 302 target is a signed blob URL on another host,
+    and ``requests`` drops Authorization on cross-host redirects — which
+    is exactly what that host requires."""
+    if not _github_token():
+        raise RuntimeError("GitHub artifact downloads need a token — "
+                           "see github_token.txt.example")
+    resp = requests.get(url, headers=_github_headers(), stream=True,
+                        allow_redirects=True, verify=False, timeout=120)
+    resp.raise_for_status()
+    with open(dest, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+    if os.path.getsize(dest) == 0:
+        os.remove(dest)
+        raise RuntimeError("Artifact download returned an empty body")
+    return dest
+
+
+def _extract_member_by_name(zip_path, filename, dest):
+    """Copy the first member of a local zip whose basename is ``filename``
+    to ``dest``.  Returns True if found."""
+    target = filename.lower()
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.namelist():
+            if member.endswith("/"):
+                continue
+            if Path(member).name.lower() == target:
+                parent = os.path.dirname(dest)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                with zf.open(member) as src, open(dest, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                return True
+    return False
+
+
 def find_local_arcropolis_override():
     """Check LOCAL_ATMOSPHERE_DIR (the general manual-override folder,
     ``switch_setup/downloads/``) for a hand-placed ARCropolis build.
@@ -7365,6 +7453,11 @@ def profile_config(profile):
         # Default new profiles to the unofficial Atmosphere branch — every
         # current FW needs it until the official build catches up.
         "unofficial_atmo": bool(profile.get("unofficial_atmo", True)),
+        # ARCropolis from its CI build rather than the (often lagging)
+        # release.  Defaults on for the same reason unofficial_atmo does:
+        # after a Smash update, the release is the thing that's broken.
+        # Needs a GitHub token; falls back to the release without one.
+        "nightly_arcropolis": bool(profile.get("nightly_arcropolis", True)),
         "plugins": effective_plugins,
     }
 
@@ -8183,6 +8276,7 @@ class GameBananaBrowser:
         self._active_profile = "Competitive"  # provisioning profile
         self._active_user_profile = None  # user profile (gb_profiles.json key)
         self._use_unofficial_atmo = True  # prefer unofficial/pre-release Atmosphere
+        self._use_nightly_arcropolis = True  # prefer ARCropolis CI build over release
         self._gallery_win = None       # reusable image gallery Toplevel
         self._fav_filter = "All"       # "All", "Skins Only", "Stages Only"
         self._profile_mode = False     # True to add mods to profile instead of SD
@@ -10490,13 +10584,22 @@ class GameBananaBrowser:
             activeforeground=T.PEACH, font=(T.FONT, T.SZ_SM)).grid(
                 row=4, column=0, columnspan=2, sticky="w", pady=(2, 4))
 
+        nightly_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            body,
+            text="Use ARCropolis nightly build (needs github_token.txt)",
+            variable=nightly_var, bg=T.SURFACE, fg=T.PEACH,
+            selectcolor=T.CRUST, activebackground=T.SURFACE,
+            activeforeground=T.PEACH, font=(T.FONT, T.SZ_SM)).grid(
+                row=5, column=0, columnspan=2, sticky="w", pady=(2, 4))
+
         # Plugin checkboxes — one per known optional plugin, all enabled
         # by default for the typical "tournament Switch" baseline.
         tk.Label(body, text="Plugins:", bg=T.SURFACE, fg=T.FG,
                  font=(T.FONT, T.SZ_SM, "bold")).grid(
-                     row=5, column=0, sticky="nw", pady=(8, 2))
+                     row=6, column=0, sticky="nw", pady=(8, 2))
         plugins_frame = tk.Frame(body, bg=T.SURFACE)
-        plugins_frame.grid(row=5, column=1, sticky="we", pady=(8, 2))
+        plugins_frame.grid(row=6, column=1, sticky="we", pady=(8, 2))
         plugin_vars = {}
         for nro in selectable_plugins():
             meta = KNOWN_PLUGINS[nro]
@@ -10586,6 +10689,7 @@ class GameBananaBrowser:
                 "template": template,
                 "wifi_safe": bool(wifi_var.get()),
                 "unofficial_atmo": bool(atmo_var.get()),
+                "nightly_arcropolis": bool(nightly_var.get()),
                 "plugins": [nro for nro, v in plugin_vars.items()
                             if v.get()],
             }
@@ -14002,6 +14106,7 @@ class GameBananaBrowser:
                     "template": "Custom",
                     "wifi_safe": True,
                     "unofficial_atmo": True,
+                    "nightly_arcropolis": True,
                     "plugins": selectable_plugins(),
                 }
                 save_profiles(profiles)
@@ -16099,6 +16204,13 @@ class GameBananaBrowser:
                     detail += f"  · built for Smash {req}"
                 if find_local_arcropolis_override():
                     detail += "  · local override active"
+                elif (getattr(self, "_use_nightly_arcropolis", True)
+                        and not _github_token()):
+                    # Nightly is on but can't be fetched: GitHub won't
+                    # serve artifact downloads anonymously.  Say so here
+                    # rather than only in the install log.
+                    detail += ("  ⚠ nightly needs a GitHub token "
+                               "(github_token.txt) — release used")
             checks.append({
                 "name": info["name"],
                 "desc": info["desc"],
@@ -16408,15 +16520,25 @@ class GameBananaBrowser:
             font=(T.FONT, T.SZ_SM)).grid(row=2, column=0, columnspan=2,
                                           sticky="w", pady=(2, 4))
 
+        nightly_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            edit_frame,
+            text="Use ARCropolis nightly build (needs github_token.txt)",
+            variable=nightly_var,
+            bg=T.SURFACE, fg=T.PEACH, selectcolor=T.CRUST,
+            activebackground=T.SURFACE, activeforeground=T.PEACH,
+            font=(T.FONT, T.SZ_SM)).grid(row=3, column=0, columnspan=2,
+                                          sticky="w", pady=(2, 4))
+
         # Plugin checkboxes — one for every known optional plugin.  We no
         # longer hide any behind a "template" concept; the user just
         # picks what they want and the card is provisioned to match.
         tk.Label(edit_frame, text="Plugins:", bg=T.SURFACE, fg=T.FG,
-                 font=(T.FONT, T.SZ_SM, "bold")).grid(row=3, column=0,
+                 font=(T.FONT, T.SZ_SM, "bold")).grid(row=4, column=0,
                                                        sticky="nw",
                                                        pady=(8, 2))
         plugins_frame = tk.Frame(edit_frame, bg=T.SURFACE)
-        plugins_frame.grid(row=3, column=1, sticky="we", pady=(8, 2))
+        plugins_frame.grid(row=4, column=1, sticky="we", pady=(8, 2))
         plugin_vars = {}
         for nro in selectable_plugins():
             meta = KNOWN_PLUGINS[nro]
@@ -16443,13 +16565,13 @@ class GameBananaBrowser:
                                 fg=T.OVERLAY, justify="left",
                                 wraplength=360,
                                 font=(T.FONT, T.SZ_SM, "bold"))
-        status_label.grid(row=4, column=0, columnspan=2, sticky="w",
+        status_label.grid(row=5, column=0, columnspan=2, sticky="w",
                           pady=(10, 2))
 
         info_label = tk.Label(edit_frame, text="", bg=T.SURFACE,
                               fg=T.OVERLAY, justify="left", wraplength=360,
                               font=(T.FONT, T.SZ_XS))
-        info_label.grid(row=5, column=0, columnspan=2, sticky="w",
+        info_label.grid(row=6, column=0, columnspan=2, sticky="w",
                         pady=(2, 0))
         edit_frame.grid_columnconfigure(1, weight=1)
 
@@ -16461,6 +16583,7 @@ class GameBananaBrowser:
                 "template": "Custom",
                 "wifi_safe": bool(wifi_var.get()),
                 "unofficial_atmo": bool(atmo_var.get()),
+                "nightly_arcropolis": bool(nightly_var.get()),
                 "plugins": [nro for nro, v in plugin_vars.items()
                             if v.get()],
             }
@@ -16472,6 +16595,7 @@ class GameBananaBrowser:
 
         wifi_var.trace_add("write", _refresh_status)
         atmo_var.trace_add("write", _refresh_status)
+        nightly_var.trace_add("write", _refresh_status)
         for v in plugin_vars.values():
             v.trace_add("write", _refresh_status)
 
@@ -16489,6 +16613,7 @@ class GameBananaBrowser:
                 name_var.set(name)
                 wifi_var.set(cfg["wifi_safe"])
                 atmo_var.set(cfg["unofficial_atmo"])
+                nightly_var.set(cfg["nightly_arcropolis"])
                 sel_plugins = set(cfg["plugins"])
                 for nro, v in plugin_vars.items():
                     v.set(nro in sel_plugins)
@@ -16544,6 +16669,7 @@ class GameBananaBrowser:
             data["template"] = "Custom"
             data["wifi_safe"] = bool(wifi_var.get())
             data["unofficial_atmo"] = bool(atmo_var.get())
+            data["nightly_arcropolis"] = bool(nightly_var.get())
             data["plugins"] = [nro for nro, v in plugin_vars.items()
                                if v.get()]
             profiles[new_name] = data
@@ -16575,6 +16701,7 @@ class GameBananaBrowser:
                 "template": "Custom",
                 "wifi_safe": True,
                 "unofficial_atmo": True,
+                "nightly_arcropolis": True,
                 "plugins": all_plugins,
             }
             save_profiles(profiles)
@@ -16712,6 +16839,7 @@ class GameBananaBrowser:
 
         wifi_var.trace_add("write", _refresh_provision_button)
         atmo_var.trace_add("write", _refresh_provision_button)
+        nightly_var.trace_add("write", _refresh_provision_button)
         for v in plugin_vars.values():
             v.trace_add("write", _refresh_provision_button)
 
@@ -16726,6 +16854,7 @@ class GameBananaBrowser:
                 _save()
         wifi_var.trace_add("write", _autosave)
         atmo_var.trace_add("write", _autosave)
+        nightly_var.trace_add("write", _autosave)
         for v in plugin_vars.values():
             v.trace_add("write", _autosave)
         name_entry.bind("<FocusOut>", lambda _e: _autosave())
@@ -16808,10 +16937,12 @@ class GameBananaBrowser:
         # tournament Switch can stay on stable while a casual one runs
         # the support branch.
         self._use_unofficial_atmo = cfg["unofficial_atmo"]
+        self._use_nightly_arcropolis = cfg["nightly_arcropolis"]
         print(f"  Provisioning '{profile_name}'  →  "
               f"template={self._active_profile}, "
               f"wifi_safe={cfg['wifi_safe']}, "
-              f"unofficial_atmo={cfg['unofficial_atmo']}")
+              f"unofficial_atmo={cfg['unofficial_atmo']}, "
+              f"nightly_arcropolis={cfg['nightly_arcropolis']}")
         self._setup_checks_done = False
         self._show_setup()
         self._run_async(self._provision)
@@ -17362,19 +17493,35 @@ class GameBananaBrowser:
             print(f"    ✓ {name} installed from local override "
                   f"({sz / 1024:.0f} KB)")
         else:
-            repo = GITHUB_REPOS[repo_key][0]
-            print(f"    Downloading latest from GitHub ({repo})…")
-            # One resolver for every plugin: ARCropolis and the Online
-            # Deluxe chain ship inside release zips, the rest as bare
-            # assets, and extract_release_file handles both by looking
-            # for the .nro name.
-            version = extract_release_file(repo, nro_name, dest)
-            if not version:
-                print(f"    ✗ {nro_name} not found in the latest {repo} "
-                      f"release{_github_rate_limit_note()}")
-                return False
-            sz = os.path.getsize(dest) if os.path.exists(dest) else 0
-            print(f"    ✓ {name} {version} installed ({sz / 1024:.0f} KB)")
+            version = None
+            # ARCropolis: prefer the CI build from its default branch when
+            # the profile asks for it.  The release can lag a Smash update
+            # by days; the nightly is what the next release will ship.
+            if (nro_name == "libarcropolis.nro"
+                    and getattr(self, "_use_nightly_arcropolis", True)):
+                ok, label = self._install_arcropolis_nightly(dest)
+                if ok:
+                    version = label
+                    sz = os.path.getsize(dest)
+                    print(f"    ✓ {name} {version} installed "
+                          f"({sz / 1024:.0f} KB)")
+                else:
+                    print(f"    ⚠ ARCropolis nightly unavailable — {label}")
+                    print(f"      Falling back to the latest release.")
+            if version is None:
+                repo = GITHUB_REPOS[repo_key][0]
+                print(f"    Downloading latest from GitHub ({repo})…")
+                # One resolver for every plugin: ARCropolis and the Online
+                # Deluxe chain ship inside release zips, the rest as bare
+                # assets, and extract_release_file handles both by looking
+                # for the .nro name.
+                version = extract_release_file(repo, nro_name, dest)
+                if not version:
+                    print(f"    ✗ {nro_name} not found in the latest {repo} "
+                          f"release{_github_rate_limit_note()}")
+                    return False
+                sz = os.path.getsize(dest) if os.path.exists(dest) else 0
+                print(f"    ✓ {name} {version} installed ({sz / 1024:.0f} KB)")
 
         if nro_name == "libarcropolis.nro":
             req = arcropolis_required_smash_version(dest)
@@ -17448,6 +17595,45 @@ class GameBananaBrowser:
               f"({OC_SYSMODULE_TITLE_ID})")
         print(f"      Reboot the Switch for the sysmodule to start.")
         return True
+
+    def _install_arcropolis_nightly(self, dest):
+        """Install libarcropolis.nro from ARCropolis's newest CI build.
+
+        ARCropolis refuses any Smash version but the one it was built
+        for, and a new Smash update can leave the fix on its default
+        branch unreleased for days (13.0.5 shipped; v4.0.9 was still a
+        13.0.4 build).  The CI artifact from that branch is the same
+        thing the next release will ship, just earlier.  Needs a GitHub
+        token: GitHub does not serve artifact downloads anonymously.
+
+        Returns ``(ok, label)`` — a short source description on success,
+        or the reason on failure so the caller can fall back to the
+        release and say why.
+        """
+        if not _github_token():
+            return False, ("nightly needs a GitHub token (see "
+                           "github_token.txt.example) — GitHub won't serve "
+                           "artifact downloads anonymously")
+        repo = GITHUB_REPOS["arcropolis"][0]
+        art = github_latest_ci_artifact(repo, ARCROPOLIS_CI_ARTIFACT,
+                                        ARCROPOLIS_CI_BRANCH)
+        if not art or not art.get("url"):
+            return False, (f"no CI artifact found on {repo}@"
+                           f"{ARCROPOLIS_CI_BRANCH}{_github_rate_limit_note()}")
+        tmp = os.path.join(tempfile.gettempdir(), "sn_arcropolis_nightly.zip")
+        try:
+            download_github_artifact(art["url"], tmp)
+            if not _extract_member_by_name(tmp, "libarcropolis.nro", dest):
+                return False, "artifact zip has no libarcropolis.nro"
+        except Exception as e:
+            return False, f"nightly download failed: {e}"
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return True, (f"nightly {art['head_sha'][:7]} "
+                      f"({art['created_at'][:10]})")
 
     def _remove_oc_sysmodule(self):
         """Remove the overclock sysmodule when the profile drops Online Deluxe."""
