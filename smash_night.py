@@ -516,6 +516,41 @@ def _apply_sd_drive(drive, pin=None):
         os.path.join(drive, "atmosphere", "reboot_payload.bin"),
     ]
 
+# ── SSBU Online Deluxe ──
+# Supersedes Latency Slider DE + Less Delay.  Neither of those works on
+# SSBU 13.0.5, and ssbu-online-deluxe rolls both of their features (online
+# delay control, render profiles that cut native input lag) into one mod.
+#
+# It is NOT a standalone .nro.  It needs a whole plugin chain, a *pinned*
+# Skyline build — upstream warns the current Skyline release crashes with
+# it, so the working build ships inside the mod's own release zip — and a
+# boot2 overclock sysmodule.  A partial install is a guaranteed crash on
+# boot, so the dependencies below are pulled in automatically whenever the
+# mod is selected rather than offered as separate toggles.
+ONLINE_DELUXE_NRO = "libssbu_online_deluxe.nro"
+ONLINE_DELUXE_REPO_KEY = "online_deluxe"
+ONLINE_DELUXE_DEPS = [
+    "libnro_hook.nro",
+    "libsmashline_plugin.nro",
+    "libimgui_smash.nro",
+    "libssbu_pia_manager.nro",
+    "libssbusync.nro",
+    "libnx_over.nro",
+]
+
+# Overclock sysmodule shipped inside the ssbu-online-deluxe release.  It
+# lives under its own title id, not SSBU's, so it gets an accessor rather
+# than a module global — the SD path must be re-read on every access
+# (see _apply_sd_drive), never cached at import time.
+OC_SYSMODULE_TITLE_ID = "00FF0000A11CE0FF"
+
+
+def oc_sysmodule_dir():
+    """``<SD>/atmosphere/contents/00FF0000A11CE0FF`` for the active drive."""
+    return os.path.join(SD_CARD, "atmosphere", "contents",
+                        OC_SYSMODULE_TITLE_ID)
+
+
 # Local copies of plugin .nro files (bundled with this repo)
 LOCAL_PLUGINS = {
     "libarcropolis.nro": os.path.join(SCRIPT_DIR, "switch_setup", "mods", "arcropolis",
@@ -526,16 +561,94 @@ LOCAL_PLUGINS = {
                                               "liblatency_slider_de.nro"),
     "libless_delay.nro": os.path.join(SCRIPT_DIR, "smash_mods", "libless_delay.nro"),
 }
+# The Online Deluxe chain caches under smash_mods/ too.  Nothing for it is
+# bundled in the repo — the cache is seeded by the first successful
+# download, so a later offline provision has something to fall back on
+# (see _install_plugin).
+LOCAL_PLUGINS.update({
+    nro: os.path.join(SCRIPT_DIR, "smash_mods", nro)
+    for nro in [ONLINE_DELUXE_NRO] + ONLINE_DELUXE_DEPS
+})
 
-# Known plugins metadata
+# Known plugins metadata.
+#   dependency=True  → follows SSBU Online Deluxe, never toggled alone
+#   deprecated=True  → never installed; still listed so a card provisioned
+#                      by an older build is recognised and cleaned up
 KNOWN_PLUGINS = {
     "libarcropolis.nro": {"name": "ARCropolis", "wifi_safe": True,
         "desc": "File replacement engine — loads skin mods"},
+    ONLINE_DELUXE_NRO: {"name": "SSBU Online Deluxe", "wifi_safe": True,
+        "desc": "Online delay control + low-lag render profiles"},
+    "libnro_hook.nro": {"name": "NRO Hook", "wifi_safe": True,
+        "desc": "Required by SSBU Online Deluxe", "dependency": True},
+    "libsmashline_plugin.nro": {"name": "Smashline", "wifi_safe": True,
+        "desc": "Required by SSBU Online Deluxe — fighter hooks",
+        "dependency": True},
+    "libimgui_smash.nro": {"name": "imgui-smash", "wifi_safe": True,
+        "desc": "Required by SSBU Online Deluxe — in-game overlay",
+        "dependency": True},
+    "libssbu_pia_manager.nro": {"name": "SSBU Pia Manager", "wifi_safe": True,
+        "desc": "Required by SSBU Online Deluxe — peer connection info",
+        "dependency": True},
+    "libssbusync.nro": {"name": "SsbuSync", "wifi_safe": True,
+        "desc": "Required by SSBU Online Deluxe — render system control",
+        "dependency": True},
+    "libnx_over.nro": {"name": "nx-over", "wifi_safe": True,
+        "desc": "Required by SSBU Online Deluxe — overclock service client",
+        "dependency": True},
     "liblatency_slider_de.nro": {"name": "Latency Slider DE", "wifi_safe": True,
-        "desc": "Adjusts local input buffer for less lag"},
+        "desc": "Retired (broken on SSBU 13.0.5) — replaced by SSBU Online Deluxe",
+        "deprecated": True},
     "libless_delay.nro": {"name": "Less Delay", "wifi_safe": True,
-        "desc": "Client-side vsync mod, reduces display latency"},
+        "desc": "Retired (broken on SSBU 13.0.5) — replaced by SSBU Online Deluxe",
+        "deprecated": True},
 }
+
+# Retired plugin -> what replaced it.  Profiles on disk still name the old
+# ones, so they are translated at read time (migrate_retired_plugins)
+# rather than rewritten in place — gb_profiles.json stays readable by an
+# older build of the app.
+RETIRED_PLUGINS = {
+    "liblatency_slider_de.nro": ONLINE_DELUXE_NRO,
+    "libless_delay.nro": ONLINE_DELUXE_NRO,
+}
+
+
+def selectable_plugins():
+    """Plugins a user may toggle in a profile.
+
+    Excludes ARCropolis (mandatory), the retired plugins, and the SSBU
+    Online Deluxe dependency chain — those follow the mod itself.
+    """
+    return [nro for nro, meta in KNOWN_PLUGINS.items()
+            if nro not in CORE_PLUGINS
+            and not meta.get("deprecated")
+            and not meta.get("dependency")]
+
+
+def migrate_retired_plugins(plugins):
+    """Swap retired plugin entries for their replacement, preserving order."""
+    out = []
+    for nro in plugins:
+        nro = RETIRED_PLUGINS.get(nro, nro)
+        if nro not in out:
+            out.append(nro)
+    return out
+
+
+def expand_plugin_deps(plugins):
+    """Add SSBU Online Deluxe's dependency chain when the mod is selected.
+
+    Dependencies are never stored in a profile — they are derived here —
+    so a profile written by an older build, or edited by hand, still
+    resolves to a complete, bootable plugin set.
+    """
+    out = list(plugins)
+    if ONLINE_DELUXE_NRO in out:
+        for dep in ONLINE_DELUXE_DEPS:
+            if dep not in out:
+                out.append(dep)
+    return out
 
 # ── Provisioning Profiles ──
 # Core components (shared by ALL profiles): SD card, Atmosphere, Hekate,
@@ -543,9 +656,9 @@ KNOWN_PLUGINS = {
 # Each profile adds its own plugin set on top of core.
 PROVISIONING_PROFILES = {
     "Competitive": {
-        "desc": "Tournament-ready: low-latency plugins, wifi safe, no gameplay changes",
-        "plugins": ["liblatency_slider_de.nro", "libless_delay.nro"],
-        "update_keys": ["latency_slider", "less_delay"],
+        "desc": "Tournament-ready: SSBU Online Deluxe (online delay + render profiles), wifi safe, no gameplay changes",
+        "plugins": [ONLINE_DELUXE_NRO],
+        "update_keys": [ONLINE_DELUXE_REPO_KEY],
     },
     "Skins Only": {
         "desc": "Just ARCropolis for loading skin mods — no extra plugins",
@@ -581,13 +694,38 @@ LOCAL_ATMOSPHERE_DIR = os.path.join(SCRIPT_DIR, "switch_setup", "downloads")
 # atmosphere zip + fusee.bin.  Change this if a different fork becomes active.
 UNOFFICIAL_ATMOSPHERE_FORK = "zandercodes/Atmosphere-unofficial"
 
+def _release_asset_filter(nro_name):
+    """Match a release asset that either *is* this .nro or is an archive
+    that could contain it."""
+    target = nro_name.lower()
+
+    def _match(name):
+        low = name.lower()
+        return low == target or low.endswith(".zip")
+    return _match
+
+
 # GitHub repos for downloading latest releases
 GITHUB_REPOS = {
     "arcropolis": ("Raytwo/ARCropolis", lambda n: n == "release.zip"),
     "skyline": ("skyline-dev/skyline", lambda n: n == "skyline.zip"),
-    "latency_slider": ("Naxdy/latency-slider-de",
-                        lambda n: n == "liblatency_slider_de.nro"),
-    "less_delay": ("Naxdy/less-delay", lambda n: n == "libless_delay.nro"),
+    # ── SSBU Online Deluxe chain ──
+    # These filters only pick the asset whose *release tag* is shown in
+    # the UI.  Installs go through extract_release_file(), which locates
+    # the payload by its own filename — upstream renames release archives
+    # between versions far more often than it renames the files inside
+    # them, and some of these repos ship a bare .nro while others only
+    # publish a zip.
+    ONLINE_DELUXE_REPO_KEY: ("saad-script/ssbu-online-deluxe",
+                             _release_asset_filter(ONLINE_DELUXE_NRO)),
+    "nro_hook": ("ultimate-research/nro-hook-plugin",
+                 _release_asset_filter("libnro_hook.nro")),
+    "smashline": ("HDR-Development/smashline",
+                  _release_asset_filter("libsmashline_plugin.nro")),
+    "imgui_smash": ("Coolsonickirby/imgui-smash",
+                    _release_asset_filter("libimgui_smash.nro")),
+    "pia_interface": ("project-ultelier/ssbu-pia-interface",
+                      _release_asset_filter("libssbu_pia_manager.nro")),
     "atmosphere": ("Atmosphere-NX/Atmosphere",
                     lambda n: n.startswith("atmosphere-") and n.endswith(".zip")
                               and "WITHOUT" not in n.upper()),
@@ -601,8 +739,16 @@ GITHUB_REPOS = {
 # Map nro filename -> GITHUB_REPOS key for quick lookup
 _NRO_TO_REPO = {
     "libarcropolis.nro": "arcropolis",
-    "liblatency_slider_de.nro": "latency_slider",
-    "libless_delay.nro": "less_delay",
+    ONLINE_DELUXE_NRO: ONLINE_DELUXE_REPO_KEY,
+    "libnro_hook.nro": "nro_hook",
+    "libsmashline_plugin.nro": "smashline",
+    "libimgui_smash.nro": "imgui_smash",
+    "libssbu_pia_manager.nro": "pia_interface",
+    # Bundled inside the ssbu-online-deluxe release, not published alone.
+    "libssbusync.nro": ONLINE_DELUXE_REPO_KEY,
+    "libnx_over.nro": ONLINE_DELUXE_REPO_KEY,
+    # The retired plugins deliberately have no source — they are only
+    # ever removed, never installed.
 }
 
 SSBU_GAME_ID = 6498
@@ -3094,6 +3240,105 @@ def github_latest_asset(repo, asset_filter):
     return None
 
 
+# Release archives downloaded during this run, keyed by asset URL.  The
+# ssbu-online-deluxe zip alone supplies seven files (three plugins, two
+# exefs files and the two sysmodule files) — without this each one would
+# re-download the whole archive.  Cleared by _clear_release_cache().
+_RELEASE_ZIP_CACHE = {}
+
+
+def github_latest_release(repo):
+    """Return the raw 'latest release' JSON for ``repo``, or None.
+
+    ``github_latest_asset`` answers "which asset matches this filter";
+    this answers "give me the whole release" so a caller can look at every
+    asset — and inside them — in one API call."""
+    if not HAS_REQUESTS:
+        return None
+    try:
+        resp = _github_api_get(
+            f"https://api.github.com/repos/{repo}/releases/latest")
+        return resp.json()
+    except GitHubRateLimitError:
+        pass
+    except Exception as e:
+        _record_github_error(e)
+    return None
+
+
+def _cached_release_zip(url, asset_name):
+    """Download a release archive at most once per run; return its path."""
+    cached = _RELEASE_ZIP_CACHE.get(url)
+    if cached and os.path.exists(cached):
+        return cached
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", asset_name)[-60:]
+    dest = os.path.join(tempfile.gettempdir(),
+                        f"sn_rel_{len(_RELEASE_ZIP_CACHE)}_{safe}")
+    download_file_to(url, dest)
+    _RELEASE_ZIP_CACHE[url] = dest
+    return dest
+
+
+def _clear_release_cache():
+    """Delete this run's downloaded release archives."""
+    for path in _RELEASE_ZIP_CACHE.values():
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    _RELEASE_ZIP_CACHE.clear()
+
+
+def extract_release_file(repo, filename, dest, release=None):
+    """Install one file out of ``repo``'s latest release to ``dest``.
+
+    Mirrors the lookup in the mod's own ``create-sdcard-folder.ps1``:
+    prefer a release asset named exactly ``filename``, otherwise search
+    every .zip asset for a member with that basename.  Matching on the
+    payload name rather than the asset name is what keeps this working
+    when upstream renames its release archive between versions.
+
+    Pass ``release`` (from :func:`github_latest_release`) to pull several
+    files out of one release without re-hitting the API.
+
+    Returns the release tag on success, None if the file wasn't found.
+    """
+    rel = release if release is not None else github_latest_release(repo)
+    if not rel:
+        return None
+    version = rel.get("tag_name", "?")
+    target = filename.lower()
+    parent = os.path.dirname(dest)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    assets = rel.get("assets") or []
+    # 1. A bare asset with exactly this name.
+    for asset in assets:
+        if asset.get("name", "").lower() == target:
+            download_file_to(asset["browser_download_url"], dest)
+            return version
+
+    # 2. Otherwise dig through the archives.
+    for asset in assets:
+        if not asset.get("name", "").lower().endswith(".zip"):
+            continue
+        try:
+            zpath = _cached_release_zip(asset["browser_download_url"],
+                                        asset["name"])
+            with zipfile.ZipFile(zpath, "r") as zf:
+                for member in zf.namelist():
+                    if member.endswith("/"):
+                        continue
+                    if Path(member).name.lower() == target:
+                        with zf.open(member) as src, open(dest, "wb") as out:
+                            shutil.copyfileobj(src, out)
+                        return version
+        except Exception as e:
+            print(f"    ⚠ Could not read {asset.get('name')}: {e}")
+    return None
+
+
 def _fetch_all_latest_versions():
     """Fetch latest version info for every component from GitHub.
     Returns dict keyed by GITHUB_REPOS key -> github_latest_asset result (or None)."""
@@ -3746,7 +3991,7 @@ def _install_sd_overlay(overlay_root, mod_name, metadata=None,
     deployed = []
 
     # 1. atmosphere/ → <SD>/atmosphere/.  Merge: leave existing
-    #    plugins (libarcropolis.nro, latency_slider, …) alone, only
+    #    plugins (libarcropolis.nro, libssbu_online_deluxe.nro, …) alone, only
     #    add or update files this archive ships.
     if os.path.isdir(overlay_atmo):
         atmo_dest = os.path.join(SD_CARD, "atmosphere")
@@ -6956,6 +7201,12 @@ def profile_config(profile):
             PROVISIONING_PROFILES.get(template, {}).get("plugins", []))
     else:
         effective_plugins = list(raw_plugins)
+    # Profiles saved before the 13.0.5 swap still name Latency Slider DE
+    # and Less Delay.  Translate them to their replacement and pull in
+    # its dependency chain, so an old profile provisions a working card
+    # instead of two dead plugins.
+    effective_plugins = expand_plugin_deps(
+        migrate_retired_plugins(effective_plugins))
     return {
         "template": template,
         "wifi_safe": bool(profile.get("wifi_safe", False)),
@@ -10081,9 +10332,8 @@ class GameBananaBrowser:
         plugins_frame = tk.Frame(body, bg=T.SURFACE)
         plugins_frame.grid(row=5, column=1, sticky="we", pady=(8, 2))
         plugin_vars = {}
-        for nro, meta in KNOWN_PLUGINS.items():
-            if nro in CORE_PLUGINS:
-                continue
+        for nro in selectable_plugins():
+            meta = KNOWN_PLUGINS[nro]
             v = tk.BooleanVar(value=True)
             plugin_vars[nro] = v
             row = tk.Frame(plugins_frame, bg=T.SURFACE)
@@ -13560,8 +13810,7 @@ class GameBananaBrowser:
                     "template": "Custom",
                     "wifi_safe": True,
                     "unofficial_atmo": True,
-                    "plugins": [nro for nro in KNOWN_PLUGINS
-                                if nro not in CORE_PLUGINS],
+                    "plugins": selectable_plugins(),
                 }
                 save_profiles(profiles)
                 print(f"\n=== Created profile '{name}' (empty) ===\n")
@@ -15105,18 +15354,20 @@ class GameBananaBrowser:
         # concurrent re-render of the Setup tab, so guard winfo_exists().
         if (hasattr(self, "_setup_version_label")
                 and self._setup_version_label.winfo_exists()):
-            ls_info = latest.get("latency_slider")
-            if ls_info:
-                body = ls_info.get("body", "")
-                import re as _re
-                m = _re.search(r'compatible with version\s+([\d.]+)\s+of SSBU',
-                               body, _re.IGNORECASE)
+            dx_info = latest.get(ONLINE_DELUXE_REPO_KEY)
+            if dx_info:
+                # Upstream names the SSBU build it targets in its release
+                # notes; fall back to just the mod version when it doesn't.
+                body = dx_info.get("body", "") or ""
+                m = re.search(r'\bSSBU\s+v?(\d+\.\d+\.\d+)', body,
+                              re.IGNORECASE)
                 if m:
-                    self._setup_version_label.configure(
-                        text=f"Plugins target SSBU {m.group(1)} — keep your game updated.",
-                        fg=T.OVERLAY)
+                    text = (f"SSBU Online Deluxe {dx_info['version']} targets "
+                            f"SSBU {m.group(1)} — keep your game updated.")
                 else:
-                    self._setup_version_label.configure(text="")
+                    text = (f"SSBU Online Deluxe {dx_info['version']} — keep "
+                            f"your game and plugins in sync.")
+                self._setup_version_label.configure(text=text, fg=T.OVERLAY)
             else:
                 self._setup_version_label.configure(text="")
 
@@ -15529,9 +15780,15 @@ class GameBananaBrowser:
         skyline_ok = os.path.exists(subsdk) and os.path.exists(npdm)
         skyline_detail = "Missing"
         sky_info = latest.get("skyline")
+        # SSBU Online Deluxe pins its own Skyline build, so don't advertise
+        # skyline-dev's latest as the thing to chase — installing it is
+        # exactly what upstream warns crashes the game.
+        deluxe_active = ONLINE_DELUXE_NRO in self._active_plugin_list()
         if skyline_ok:
             skyline_detail = "Installed"
-            if sky_info:
+            if deluxe_active:
+                skyline_detail += "  (pinned by SSBU Online Deluxe)"
+            elif sky_info:
                 skyline_detail += f"  (latest: {sky_info['version']})"
         checks.append({
             "name": "Skyline (exefs)",
@@ -15542,12 +15799,34 @@ class GameBananaBrowser:
             "section": "core",
         })
 
+        # 3b. Overclock sysmodule — only meaningful with Online Deluxe.
+        # Without it the mod still boots but stutters badly on console
+        # whenever a non-vanilla render profile is active.
+        oc_dir = oc_sysmodule_dir()
+        oc_present = (os.path.exists(os.path.join(oc_dir, "exefs.nsp"))
+                      and os.path.exists(os.path.join(oc_dir, "flags",
+                                                      "boot2.flag")))
+        if deluxe_active:
+            checks.append({
+                "name": "Overclock sysmodule",
+                "desc": "Keeps SSBU Online Deluxe render profiles stutter-free",
+                "ok": oc_present,
+                "detail": "Installed" if oc_present else "Missing",
+                "fixable": True, "fix_key": "oc_sysmodule",
+                "section": "profile",
+            })
+        elif oc_present:
+            checks.append({
+                "name": "Overclock sysmodule",
+                "desc": "Left over from SSBU Online Deluxe",
+                "ok": True, "warn": True,
+                "detail": f"Not in {self._active_profile} — removed on Provision",
+                "fixable": True, "fix_key": "remove_oc_sysmodule",
+                "section": "profile",
+            })
+
         # 4-6. Plugins — only check core + active profile plugins
-        plugin_repo_map = {
-            "libarcropolis.nro": "arcropolis",
-            "liblatency_slider_de.nro": "latency_slider",
-            "libless_delay.nro": "less_delay",
-        }
+        plugin_repo_map = _NRO_TO_REPO
         profile = PROVISIONING_PROFILES.get(self._active_profile, {})
         profile_plugins = set(CORE_PLUGINS + self._active_plugin_list())
         for nro_name, info in KNOWN_PLUGINS.items():
@@ -15565,8 +15844,13 @@ class GameBananaBrowser:
                 detail = "Installed"
                 if gh:
                     gh_sz = gh["size"]
-                    # For direct .nro downloads, size comparison is meaningful
-                    if repo_key != "arcropolis" and gh_sz > 0 and abs(sz - gh_sz) > 512:
+                    # Size comparison is only meaningful when the release
+                    # asset *is* the .nro.  Anything shipped inside a zip
+                    # (ARCropolis, the whole Online Deluxe chain) would
+                    # compare the archive's size against one file's and
+                    # always look stale.
+                    from_zip = gh.get("filename", "").lower().endswith(".zip")
+                    if not from_zip and gh_sz > 0 and abs(sz - gh_sz) > 512:
                         detail += f"  ⚠ update available ({gh['version']})"
                         warn = True
                     else:
@@ -15775,9 +16059,15 @@ class GameBananaBrowser:
         if key.startswith("remove:"):
             nro_name = key[len("remove:"):]
             self._remove_plugin(nro_name)
+        elif key == "remove_oc_sysmodule":
+            self._remove_oc_sysmodule()
         elif key == "skyline":
             self._install_skyline()
-        elif key in LOCAL_PLUGINS:
+        elif key == "oc_sysmodule":
+            self._install_oc_sysmodule()
+        # Dispatch on the plugin registry, not the local-cache table:
+        # the Online Deluxe chain has no copy bundled in this repo.
+        elif key in KNOWN_PLUGINS:
             self._install_plugin(key)
         elif key == "atmosphere":
             self._update_atmosphere()
@@ -15888,9 +16178,8 @@ class GameBananaBrowser:
         plugins_frame = tk.Frame(edit_frame, bg=T.SURFACE)
         plugins_frame.grid(row=3, column=1, sticky="we", pady=(8, 2))
         plugin_vars = {}
-        for nro, meta in KNOWN_PLUGINS.items():
-            if nro in CORE_PLUGINS:
-                continue  # ARCropolis is mandatory, not user-toggleable
+        for nro in selectable_plugins():
+            meta = KNOWN_PLUGINS[nro]
             v = tk.BooleanVar(value=False)
             plugin_vars[nro] = v
             row = tk.Frame(plugins_frame, bg=T.SURFACE)
@@ -16039,8 +16328,7 @@ class GameBananaBrowser:
             # Default new profiles to all known plugins enabled, Wifi-Safe
             # on, unofficial Atmosphere on — the common "tournament
             # Switch" baseline.
-            all_plugins = [nro for nro in KNOWN_PLUGINS
-                           if nro not in CORE_PLUGINS]
+            all_plugins = selectable_plugins()
             profiles[name] = {
                 "created": datetime.now().isoformat(),
                 "mods": [],
@@ -16217,7 +16505,9 @@ class GameBananaBrowser:
         """
         prof = load_profiles().get(self._active_user_profile or "")
         if prof is None:
-            return list(PROVISIONING_PROFILES.get(
+            # profile_config() would have expanded dependencies for us;
+            # the template fallback has to do it itself.
+            return expand_plugin_deps(PROVISIONING_PROFILES.get(
                 self._active_profile, {}).get("plugins", []))
         return profile_config(prof)["plugins"]
 
@@ -16235,7 +16525,10 @@ class GameBananaBrowser:
         if not os.path.isdir(PLUGINS_DIR):
             return "unprovisioned", "Card not provisioned (no plugins dir)", T.RED
         non_core = [nro for nro in KNOWN_PLUGINS if nro not in CORE_PLUGINS]
-        expected = set(cfg["plugins"]) | set(CORE_PLUGINS)
+        # cfg may come straight from the profile editor's checkboxes
+        # (_current_cfg_from_ui), which never carries dependencies —
+        # expand here so they don't read as "unexpected" on the card.
+        expected = set(expand_plugin_deps(cfg["plugins"])) | set(CORE_PLUGINS)
         present = {nro for nro in KNOWN_PLUGINS
                    if os.path.exists(os.path.join(PLUGINS_DIR, nro))}
         missing = expected - present
@@ -16740,11 +17033,20 @@ class GameBananaBrowser:
                 self._remove_plugin(nro)
                 removed += 1
                 continue
+            if key == "remove_oc_sysmodule":
+                print(f"\n  Removing: {check['name']}…")
+                self._remove_oc_sysmodule()
+                removed += 1
+                continue
             print(f"\n  Installing: {check['name']}…")
             ok = True
             if key == "skyline":
                 self._install_skyline()
-            elif key in LOCAL_PLUGINS:
+            elif key == "oc_sysmodule":
+                ok = self._install_oc_sysmodule()
+            # Dispatch on the plugin registry, not the local-cache table:
+            # the Online Deluxe chain has no copy bundled in this repo.
+            elif key in KNOWN_PLUGINS:
                 ok = self._install_plugin(key)
             elif key == "atmosphere":
                 self._update_atmosphere()
@@ -16780,6 +17082,7 @@ class GameBananaBrowser:
                 self.root.after(300, lambda c=conflicts: self._show_conflict_resolver(c))
                 return  # resolver handles its own refresh
 
+        _clear_release_cache()
         print(f"\n=== DONE — provisioning complete ===\n")
         self.root.after(500, self._show_setup)
 
@@ -16803,31 +17106,20 @@ class GameBananaBrowser:
             print(f"    No GitHub source for {nro_name}")
             return False
 
-        repo, filt = GITHUB_REPOS[repo_key]
+        repo = GITHUB_REPOS[repo_key][0]
         print(f"    Downloading latest from GitHub ({repo})…")
-        info = github_latest_asset(repo, filt)
-        if not info:
-            print(f"    ✗ Could not find release on GitHub{_github_rate_limit_note()}")
+        # One resolver for every plugin: ARCropolis and the Online Deluxe
+        # chain ship inside release zips, the rest as bare assets, and
+        # extract_release_file handles both by looking for the .nro name.
+        version = extract_release_file(repo, nro_name, dest)
+        if not version:
+            print(f"    ✗ {nro_name} not found in the latest {repo} "
+                  f"release{_github_rate_limit_note()}")
             return False
-
-        if repo_key == "arcropolis":
-            # ARCropolis comes as a zip
-            tmp = os.path.join(tempfile.gettempdir(), "arc_release.zip")
-            download_file_to(info["url"], tmp)
-            with zipfile.ZipFile(tmp, "r") as zf:
-                for f in zf.namelist():
-                    if f.endswith("libarcropolis.nro"):
-                        with zf.open(f) as src:
-                            with open(dest, "wb") as dst:
-                                dst.write(src.read())
-                        break
-            os.remove(tmp)
-        else:
-            download_file_to(info["url"], dest)
 
         sz = os.path.getsize(dest) if os.path.exists(dest) else 0
         name = KNOWN_PLUGINS.get(nro_name, {}).get("name", nro_name)
-        print(f"    ✓ {name} {info['version']} installed ({sz / 1024:.0f} KB)")
+        print(f"    ✓ {name} {version} installed ({sz / 1024:.0f} KB)")
 
         # Also update local cache copy so we stay current
         local = LOCAL_PLUGINS.get(nro_name)
@@ -16860,9 +17152,72 @@ class GameBananaBrowser:
         print(f"    ✗ No source available for {nro_name}")
         return False
 
+    def _install_oc_sysmodule(self):
+        """Install the boot2 overclock sysmodule SSBU Online Deluxe uses.
+
+        Without it the mod boots fine but drops frames badly on console
+        whenever a non-vanilla render profile is active — upstream puts up
+        an in-game error telling you to either install this or set
+        ``overclocker = false`` in the mod's config.toml.
+        """
+        oc_dir = oc_sysmodule_dir()
+        flags_dir = os.path.join(oc_dir, "flags")
+        os.makedirs(flags_dir, exist_ok=True)
+        repo = GITHUB_REPOS[ONLINE_DELUXE_REPO_KEY][0]
+        print(f"    Downloading overclock sysmodule from {repo}…")
+        rel = github_latest_release(repo)
+        version = extract_release_file(repo, "exefs.nsp",
+                                       os.path.join(oc_dir, "exefs.nsp"),
+                                       release=rel)
+        if not version:
+            print(f"    ✗ exefs.nsp not found in the latest {repo} "
+                  f"release{_github_rate_limit_note()}")
+            return False
+        # boot2.flag is a zero-byte marker: take it from the release if
+        # it ships one, otherwise just create it.
+        flag = os.path.join(flags_dir, "boot2.flag")
+        if not extract_release_file(repo, "boot2.flag", flag, release=rel):
+            open(flag, "wb").close()
+        print(f"    ✓ Overclock sysmodule {version} installed "
+              f"({OC_SYSMODULE_TITLE_ID})")
+        print(f"      Reboot the Switch for the sysmodule to start.")
+        return True
+
+    def _remove_oc_sysmodule(self):
+        """Remove the overclock sysmodule when the profile drops Online Deluxe."""
+        oc_dir = oc_sysmodule_dir()
+        if os.path.isdir(oc_dir):
+            shutil.rmtree(oc_dir, ignore_errors=True)
+            print(f"    ✓ Removed overclock sysmodule ({OC_SYSMODULE_TITLE_ID})")
+        else:
+            print(f"    Overclock sysmodule not found on SD — already removed")
+
     def _install_skyline(self):
-        """Install Skyline exefs files from GitHub."""
+        """Install Skyline exefs files (main.npdm + subsdk9).
+
+        When SSBU Online Deluxe is in the active profile, take the Skyline
+        build bundled in *its* release rather than skyline-dev's latest:
+        upstream pins it deliberately because the current Skyline release
+        crashes with the mod.
+        """
         os.makedirs(EXEFS_DIR, exist_ok=True)
+        if ONLINE_DELUXE_NRO in self._active_plugin_list():
+            dx_repo = GITHUB_REPOS[ONLINE_DELUXE_REPO_KEY][0]
+            print(f"    Downloading pinned Skyline from {dx_repo}…")
+            rel = github_latest_release(dx_repo)
+            got = []
+            for fn in ("main.npdm", "subsdk9"):
+                if extract_release_file(dx_repo, fn,
+                                        os.path.join(EXEFS_DIR, fn),
+                                        release=rel):
+                    got.append(fn)
+                    print(f"    ✓ Installed: {fn}")
+            if len(got) == 2:
+                print(f"    Skyline (pinned by SSBU Online Deluxe) installed.")
+                return
+            print(f"    ⚠ Pinned Skyline not in the {dx_repo} release — "
+                  f"falling back to the latest upstream build.")
+
         repo, filt = GITHUB_REPOS["skyline"]
         print(f"    Downloading Skyline from GitHub…")
         info = github_latest_asset(repo, filt)
@@ -17169,18 +17524,23 @@ class GameBananaBrowser:
         # Skyline
         subsdk = os.path.join(EXEFS_DIR, "subsdk9")
         sky_info = latest.get("skyline")
-        if os.path.exists(subsdk) and sky_info:
-            up_to_date.append(("Skyline", f"installed  |  latest: {sky_info['version']}"))
+        check_plugins = list(CORE_PLUGINS) + self._active_plugin_list()
+        # Online Deluxe pins its own Skyline, so don't report skyline-dev's
+        # latest as an update to chase — that build is what crashes it.
+        if ONLINE_DELUXE_NRO in check_plugins:
+            sky_ver = "pinned by SSBU Online Deluxe"
         elif sky_info:
-            missing.append(("Skyline", f"NOT installed  |  latest: {sky_info['version']}"))
+            sky_ver = f"latest: {sky_info['version']}"
+        else:
+            sky_ver = None
+        if sky_ver:
+            if os.path.exists(subsdk):
+                up_to_date.append(("Skyline", f"installed  |  {sky_ver}"))
+            else:
+                missing.append(("Skyline", f"NOT installed  |  {sky_ver}"))
 
         # ── Plugins (core + profile) ──
-        plugin_repo_map = {
-            "libarcropolis.nro": "arcropolis",
-            "liblatency_slider_de.nro": "latency_slider",
-            "libless_delay.nro": "less_delay",
-        }
-        check_plugins = list(CORE_PLUGINS) + self._active_plugin_list()
+        plugin_repo_map = _NRO_TO_REPO
         for nro_name in check_plugins:
             repo_key = plugin_repo_map.get(nro_name)
             gh = latest.get(repo_key) if repo_key else None
@@ -17199,8 +17559,10 @@ class GameBananaBrowser:
 
             gh_sz = gh["size"]
             ver = gh["version"]
-            # For zip-based assets (arcropolis), skip size comparison
-            if repo_key == "arcropolis":
+            # Skip the size comparison when the release ships the plugin
+            # inside a zip — the asset size is the archive's, not the
+            # .nro's, so every zip-sourced plugin would look stale.
+            if gh.get("filename", "").lower().endswith(".zip"):
                 up_to_date.append((name, f"{sz / 1024:.0f} KB  |  latest: {ver}"))
             elif gh_sz > 0 and abs(sz - gh_sz) > 512:
                 updates.append((name,
@@ -17256,11 +17618,16 @@ class GameBananaBrowser:
             ("ARCropolis", lambda: (os.makedirs(PLUGINS_DIR, exist_ok=True),
                                     self._download_plugin_from_github("libarcropolis.nro"))),
         ]
-        # Add profile-specific plugins
+        # Add profile-specific plugins (dependencies included — see
+        # _active_plugin_list)
         for nro_name in profile_plugins:
             plugin_name = KNOWN_PLUGINS.get(nro_name, {}).get("name", nro_name)
             steps.append((plugin_name, lambda n=nro_name:
                           self._download_plugin_from_github(n)))
+        # The overclock sysmodule isn't a plugin, so it needs its own step.
+        if ONLINE_DELUXE_NRO in profile_plugins:
+            steps.append(("Overclock sysmodule",
+                          lambda: self._install_oc_sysmodule()))
 
         total = len(steps) + 1  # +1 for cache clear
         print(f"\n=== Updating All ({self._active_profile} profile) — {total} steps ===")
@@ -17271,6 +17638,7 @@ class GameBananaBrowser:
 
         print(f"\n  [{total}/{total}] Clearing cache…")
         self._do_clear_cache()
+        _clear_release_cache()
 
         print(f"\n  ✓ All components updated ({self._active_profile})! "
               f"Safe to eject SD and boot Switch.")
