@@ -3559,6 +3559,94 @@ def find_local_fusee_override():
     return None
 
 
+def arcropolis_required_smash_version(nro_path):
+    """Read the Smash version an ARCropolis build was made for.
+
+    ARCropolis hard-refuses any other version and embeds the check's
+    dialog text as a plain string ("...cannot currently run on a Smash
+    version other than 13.0.4"), so it can be read straight out of the
+    .nro.  This is what lets the Setup tab say "built for Smash 13.0.4"
+    *before* the user boots and sees the game refuse to load mods.
+    Returns e.g. "13.0.4", or None if the string isn't there.
+    """
+    try:
+        with open(nro_path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    m = re.search(rb"other than (\d+\.\d+\.\d+)", data)
+    return m.group(1).decode("ascii") if m else None
+
+
+def find_local_arcropolis_override():
+    """Check LOCAL_ATMOSPHERE_DIR (the general manual-override folder,
+    ``switch_setup/downloads/``) for a hand-placed ARCropolis build.
+
+    Same idea as the Atmosphere override: when a new Smash version ships,
+    the ARCropolis *release* can lag the fix on ``main`` by days, and the
+    only working build is a CI artifact or a local compile.  Accepts a
+    bare ``libarcropolis.nro`` or any ``.zip`` containing one; newest
+    mtime wins.  Returns dict with path, filename, member (zip member
+    name, or None for a bare .nro), requires_smash, mtime, local — or None.
+    """
+    if not os.path.isdir(LOCAL_ATMOSPHERE_DIR):
+        return None
+    best = None
+    for f in os.listdir(LOCAL_ATMOSPHERE_DIR):
+        path = os.path.join(LOCAL_ATMOSPHERE_DIR, f)
+        if not os.path.isfile(path):
+            continue
+        low = f.lower()
+        member = None
+        if low == "libarcropolis.nro":
+            pass
+        elif low.endswith(".zip") and not low.startswith("atmosphere-") \
+                and not low.startswith("hekate_"):
+            try:
+                with zipfile.ZipFile(path, "r") as zf:
+                    member = next((n for n in zf.namelist()
+                                   if Path(n).name.lower() == "libarcropolis.nro"),
+                                  None)
+            except Exception:
+                continue
+            if member is None:
+                continue
+        else:
+            continue
+        mtime = os.path.getmtime(path)
+        entry = {"path": path, "filename": f, "member": member,
+                 "mtime": mtime, "local": True}
+        if best is None or mtime > best["mtime"]:
+            best = entry
+    if best:
+        if best["member"] is None:
+            best["requires_smash"] = arcropolis_required_smash_version(best["path"])
+        else:
+            try:
+                with zipfile.ZipFile(best["path"], "r") as zf:
+                    m = re.search(rb"other than (\d+\.\d+\.\d+)",
+                                  zf.read(best["member"]))
+                best["requires_smash"] = m.group(1).decode("ascii") if m else None
+            except Exception:
+                best["requires_smash"] = None
+    return best
+
+
+def install_local_arcropolis_override(entry, dest):
+    """Copy (or extract) an override found by find_local_arcropolis_override
+    to ``dest``.  Returns the number of bytes written."""
+    parent = os.path.dirname(dest)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if entry.get("member"):
+        with zipfile.ZipFile(entry["path"], "r") as zf, \
+                zf.open(entry["member"]) as src, open(dest, "wb") as out:
+            shutil.copyfileobj(src, out)
+    else:
+        shutil.copyfile(entry["path"], dest)
+    return os.path.getsize(dest)
+
+
 def _atmo_semver(info):
     """Extract the underlying Atmosphere (major, minor, patch) from a resolved
     asset dict.  Prefers the asset filename (atmosphere-X.Y.Z-...), since fork
@@ -16001,6 +16089,16 @@ class GameBananaBrowser:
                 if gh:
                     detail = f"Missing (latest: {gh['version']})"
 
+            # ARCropolis refuses to run on any Smash version but the one it
+            # was built for, and the check's dialog text is embedded in
+            # the .nro — surface it here so a mismatch is visible before
+            # the game says "Smash Ultimate requires an update".
+            if present and nro_name == "libarcropolis.nro":
+                req = arcropolis_required_smash_version(nro_path)
+                if req:
+                    detail += f"  · built for Smash {req}"
+                if find_local_arcropolis_override():
+                    detail += "  · local override active"
             checks.append({
                 "name": info["name"],
                 "desc": info["desc"],
@@ -17248,20 +17346,41 @@ class GameBananaBrowser:
             print(f"    No GitHub source for {nro_name}")
             return False
 
-        repo = GITHUB_REPOS[repo_key][0]
-        print(f"    Downloading latest from GitHub ({repo})…")
-        # One resolver for every plugin: ARCropolis and the Online Deluxe
-        # chain ship inside release zips, the rest as bare assets, and
-        # extract_release_file handles both by looking for the .nro name.
-        version = extract_release_file(repo, nro_name, dest)
-        if not version:
-            print(f"    ✗ {nro_name} not found in the latest {repo} "
-                  f"release{_github_rate_limit_note()}")
-            return False
-
-        sz = os.path.getsize(dest) if os.path.exists(dest) else 0
         name = KNOWN_PLUGINS.get(nro_name, {}).get("name", nro_name)
-        print(f"    ✓ {name} {version} installed ({sz / 1024:.0f} KB)")
+        override = (find_local_arcropolis_override()
+                    if nro_name == "libarcropolis.nro" else None)
+        if override:
+            # A hand-placed build in switch_setup/downloads/ beats GitHub,
+            # same as the Atmosphere override: when a new Smash version
+            # ships, the ARCropolis release can lag the fix on main by
+            # days and the only working build is a CI artifact.  Going
+            # through this path also means Update All no longer clobbers
+            # it with the older release.
+            sz = install_local_arcropolis_override(override, dest)
+            version = f"local override: {override['filename']}"
+            print(f"    Using local override: {override['filename']}")
+            print(f"    ✓ {name} installed from local override "
+                  f"({sz / 1024:.0f} KB)")
+        else:
+            repo = GITHUB_REPOS[repo_key][0]
+            print(f"    Downloading latest from GitHub ({repo})…")
+            # One resolver for every plugin: ARCropolis and the Online
+            # Deluxe chain ship inside release zips, the rest as bare
+            # assets, and extract_release_file handles both by looking
+            # for the .nro name.
+            version = extract_release_file(repo, nro_name, dest)
+            if not version:
+                print(f"    ✗ {nro_name} not found in the latest {repo} "
+                      f"release{_github_rate_limit_note()}")
+                return False
+            sz = os.path.getsize(dest) if os.path.exists(dest) else 0
+            print(f"    ✓ {name} {version} installed ({sz / 1024:.0f} KB)")
+
+        if nro_name == "libarcropolis.nro":
+            req = arcropolis_required_smash_version(dest)
+            if req:
+                print(f"      This ARCropolis build is for Smash {req} — "
+                      f"it refuses to run on any other version.")
 
         # Also update local cache copy so we stay current
         local = LOCAL_PLUGINS.get(nro_name)
@@ -17289,6 +17408,11 @@ class GameBananaBrowser:
             name = KNOWN_PLUGINS.get(nro_name, {}).get("name", nro_name)
             print(f"    ⚠ Installed {name} from LOCAL copy ({sz / 1024:.0f} KB)")
             print(f"      WARNING: This may be outdated! Check internet and try Update.")
+            if nro_name == "libarcropolis.nro":
+                req = arcropolis_required_smash_version(dest)
+                if req:
+                    print(f"      This bundled ARCropolis is for Smash {req} — "
+                          f"it refuses to run on any other version.")
             return True
 
         print(f"    ✗ No source available for {nro_name}")
