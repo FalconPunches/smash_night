@@ -105,6 +105,16 @@ def audit(sd_card):
         problems = []
         notes = []
 
+        # Which install path did this mod take?  config.json is only
+        # rewritten when a slot was picked (install_to_sd only calls
+        # _apply_slot_map under `if slot_map:` / `elif target_slot`), so
+        # a mod installed at its native slot keeps the author's config
+        # untouched — which is why those skins work.
+        remapped = bool(meta.get("slot"))
+        notes.append("slot picked at install — config.json was rewritten"
+                     if remapped else
+                     "installed at native slot — config.json left as shipped")
+
         # ── Defect 1: share tables stripped vs the pristine copy ──
         pristine_path = _find_pristine_config(meta.get("mod_id"))
         if pristine_path:
