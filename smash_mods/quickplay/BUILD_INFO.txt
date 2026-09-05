@@ -1,3 +1,3 @@
 source=vendor/ssbu-online-deluxe (see VENDOR_INFO.md for upstream tag)
-built=2026-09-05T17:50Z
-commit=012d5d9169423da45bfc91ac73f0c8dd7555d798
+built=2026-09-05T19:33Z
+commit=16d25e214adf2b91a459c6c9736378279cb293e7
