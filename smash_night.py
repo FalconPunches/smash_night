@@ -529,19 +529,18 @@ def _apply_sd_drive(drive, pin=None):
 # mod is selected rather than offered as separate toggles.
 ONLINE_DELUXE_NRO = "libssbu_online_deluxe.nro"
 ONLINE_DELUXE_REPO_KEY = "online_deluxe"
-# Fork of ssbu-online-deluxe with the Quickplay gate removed.  Upstream
-# only enables its latency / render-profile controls in Arena, Local
-# Online and Nextendo-Quickplay; the fork treats vanilla Quickplay/Elite
-# as valid too.  Only libssbu_online_deluxe.nro itself comes from the
-# fork — the bundled Skyline, ssbusync, nx-over and sysmodule files are
-# not in the source repo and still come from upstream's release.  When
-# the fork has no release yet, install falls back to upstream.
-ONLINE_DELUXE_FORK_REPO_KEY = "online_deluxe_fork"
-
-
-def deluxe_nro_sources():
-    """GITHUB_REPOS keys to try, in order, for libssbu_online_deluxe.nro."""
-    return [ONLINE_DELUXE_FORK_REPO_KEY, ONLINE_DELUXE_REPO_KEY]
+# Quickplay-enabled build.  Upstream deliberately enables its latency /
+# render-profile controls only in Arena, Local Online and
+# Nextendo-Quickplay.  vendor/ssbu-online-deluxe/ is upstream at a pinned
+# tag with that gate removed (see its VENDOR_INFO.md), and
+# .github/workflows/build-online-deluxe.yml builds it and commits the .nro
+# here, so the app can install it with no network and no token.  Only the
+# .nro itself is replaced — the bundled Skyline, ssbusync, nx-over and
+# sysmodule files are not in the source and still come from upstream's
+# release.  When this file is absent, install falls back to upstream's
+# .nro unchanged.
+ONLINE_DELUXE_QUICKPLAY_BUILD = os.path.join(
+    SCRIPT_DIR, "smash_mods", "quickplay", ONLINE_DELUXE_NRO)
 ONLINE_DELUXE_DEPS = [
     "libnro_hook.nro",
     "libsmashline_plugin.nro",
@@ -731,9 +730,6 @@ GITHUB_REPOS = {
     # publish a zip.
     ONLINE_DELUXE_REPO_KEY: ("saad-script/ssbu-online-deluxe",
                              _release_asset_filter(ONLINE_DELUXE_NRO)),
-    # Quickplay-enabled fork — tried first for the .nro itself only.
-    ONLINE_DELUXE_FORK_REPO_KEY: ("FalconPunches/ssbu-online-deluxe",
-                                  _release_asset_filter(ONLINE_DELUXE_NRO)),
     "nro_hook": ("ultimate-research/nro-hook-plugin",
                  _release_asset_filter("libnro_hook.nro")),
     "smashline": ("HDR-Development/smashline",
@@ -17496,7 +17492,17 @@ class GameBananaBrowser:
         name = KNOWN_PLUGINS.get(nro_name, {}).get("name", nro_name)
         override = (find_local_arcropolis_override()
                     if nro_name == "libarcropolis.nro" else None)
-        if override:
+        if (nro_name == ONLINE_DELUXE_NRO
+                and os.path.isfile(ONLINE_DELUXE_QUICKPLAY_BUILD)):
+            # The Quickplay-enabled build committed by CI beats upstream's
+            # release for the .nro itself (see ONLINE_DELUXE_QUICKPLAY_BUILD).
+            # No network, no token: it's a file in the repo.
+            shutil.copyfile(ONLINE_DELUXE_QUICKPLAY_BUILD, dest)
+            sz = os.path.getsize(dest)
+            version = "Quickplay build (smash_mods/quickplay)"
+            print(f"    Using committed Quickplay-enabled build")
+            print(f"    ✓ {name} installed from {version} ({sz / 1024:.0f} KB)")
+        elif override:
             # A hand-placed build in switch_setup/downloads/ beats GitHub,
             # same as the Atmosphere override: when a new Smash version
             # ships, the ARCropolis release can lag the fix on main by
@@ -17525,25 +17531,16 @@ class GameBananaBrowser:
                     print(f"    ⚠ ARCropolis nightly unavailable — {label}")
                     print(f"      Falling back to the latest release.")
             if version is None:
+                repo = GITHUB_REPOS[repo_key][0]
+                print(f"    Downloading latest from GitHub ({repo})…")
                 # One resolver for every plugin: ARCropolis and the Online
                 # Deluxe chain ship inside release zips, the rest as bare
                 # assets, and extract_release_file handles both by looking
-                # for the .nro name.  libssbu_online_deluxe.nro itself may
-                # come from the Quickplay-enabled fork; everything else has
-                # exactly one source.
-                keys = (deluxe_nro_sources() if nro_name == ONLINE_DELUXE_NRO
-                        else [repo_key])
-                for key in keys:
-                    repo = GITHUB_REPOS[key][0]
-                    print(f"    Downloading latest from GitHub ({repo})…")
-                    version = extract_release_file(repo, nro_name, dest)
-                    if version:
-                        if key != repo_key:
-                            version = f"{version} (fork {repo})"
-                        break
+                # for the .nro name.
+                version = extract_release_file(repo, nro_name, dest)
+                if not version:
                     print(f"    ✗ {nro_name} not found in the latest {repo} "
                           f"release{_github_rate_limit_note()}")
-                if not version:
                     return False
                 sz = os.path.getsize(dest) if os.path.exists(dest) else 0
                 print(f"    ✓ {name} {version} installed ({sz / 1024:.0f} KB)")

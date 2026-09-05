@@ -1,0 +1,36 @@
+[package]
+name = "ssbu-online-deluxe"
+version = "1.4.1"
+authors = ["saad-script"]
+edition = "2021"
+
+[package.metadata.skyline]
+titleid = "01006A800016E000" # Smash Ultimate
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+dummy_connection = []
+
+[dependencies]
+skyline = { git = "https://github.com/ultimate-research/skyline-rs.git" }
+smashline = { git = "https://github.com/hdr-development/smashline.git" }
+ninput = { git = "https://github.com/blu-dev/ninput.git" }
+imgui-api = { git = "https://github.com/Coolsonickirby/imgui-api" }
+ssbu-pia-interface = { git = "https://github.com/project-ultelier/ssbu-pia-interface.git" }
+ultelier = { git = "https://github.com/project-ultelier/smash-ultelier.git", default-features = false, features = ["sync-guest"] }
+log = "0.4.19"
+zerocopy = { version = "0.8.47", features = ["derive"] }
+arc-swap = "1.9.1"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+

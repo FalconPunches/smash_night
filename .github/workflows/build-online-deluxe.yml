@@ -1,0 +1,77 @@
+name: build-online-deluxe
+
+# Builds the Quickplay-enabled libssbu_online_deluxe.nro from the vendored
+# source in vendor/ssbu-online-deluxe/ and commits it to
+# smash_mods/quickplay/ so Smash Night can install it with no network and
+# no token.
+#
+# The vendored tree is upstream saad-script/ssbu-online-deluxe at a pinned
+# tag with the Quickplay gate removed — see vendor/ssbu-online-deluxe/
+# VENDOR_INFO.md for the tag, the exact change, and how to update.  It is
+# built in the same cargo-skyline container the Smash modding projects'
+# own CI uses.
+#
+# Only the .nro is produced here.  The bundled Skyline (main.npdm /
+# subsdk9), libssbusync.nro, libnx_over.nro and the overclock sysmodule
+# are not in the source and still come from upstream's release.
+#
+# Runs on any change under vendor/ssbu-online-deluxe/, or by hand from
+# the Actions tab.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - vendor/ssbu-online-deluxe/**
+      - .github/workflows/build-online-deluxe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: jugeeya/cargo-skyline:3.0.0-dkp-beta
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build
+        working-directory: vendor/ssbu-online-deluxe
+        run: |
+          export PATH=$PATH:/root/.cargo/bin:/opt/devkitpro/devkitA64/bin
+          cargo skyline build --release
+        env:
+          HOME: /root
+
+      - name: collect
+        run: |
+          mkdir -p smash_mods/quickplay
+          NRO="$(find vendor/ssbu-online-deluxe/target -name 'libssbu_online_deluxe.nro' | head -1)"
+          test -n "$NRO" || { echo "no .nro produced"; exit 1; }
+          cp "$NRO" smash_mods/quickplay/
+          {
+            echo "source=vendor/ssbu-online-deluxe (see VENDOR_INFO.md for upstream tag)"
+            echo "built=$(date -u +%Y-%m-%dT%H:%MZ)"
+            echo "commit=$GITHUB_SHA"
+          } > smash_mods/quickplay/BUILD_INFO.txt
+          ls -la smash_mods/quickplay
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libssbu_online_deluxe-quickplay
+          path: smash_mods/quickplay/
+
+      - name: commit the binary back
+        if: github.event_name != 'pull_request'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add smash_mods/quickplay/
+          if git diff --cached --quiet; then
+            echo "binary unchanged — nothing to commit"
+            exit 0
+          fi
+          git commit -m "Build Quickplay-enabled libssbu_online_deluxe.nro [skip ci]"
+          git push
