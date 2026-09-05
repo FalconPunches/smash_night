@@ -1092,6 +1092,56 @@ def assignable_slots():
     """The slots this app may assign a mod to: c00..c07."""
     return [f"c{i:02d}" for i in range(VANILLA_SLOTS)]
 
+
+def reassign_added_slots(mods, card_occupied_by_char=None):
+    """Move any enabled profile entry sitting on c08+ down to a free c00..c07.
+
+    The old slot picker handed out c08+ freely, so saved profiles can
+    carry assignments that never worked (see VANILLA_SLOTS).  Replaying
+    one verbatim installs a mod that freezes at match load.  For each
+    such entry we pick the first assignable slot not used by another
+    enabled entry for that character in the profile, nor already
+    occupied on the card.  Entries are updated in place.
+
+    Returns ``(changed, unfixable)``: ``changed`` is a list of
+    ``{mod_id, character, name, from, to}``; ``unfixable`` lists entries
+    left on c08+ because every c00..c07 is taken — callers must skip
+    those rather than install them.
+    """
+    card_occupied_by_char = card_occupied_by_char or {}
+    taken = {}
+    for m in mods:
+        if not m.get("enabled", True):
+            continue
+        char = m.get("character") or "Other"
+        tokens = re.findall(r"c\d{2}", (m.get("slot") or ""), re.I)
+        if tokens and not is_added_slot(tokens[0]):
+            taken.setdefault(char, set()).add(tokens[0].lower())
+    for char, slots in card_occupied_by_char.items():
+        taken.setdefault(char, set()).update(s.lower() for s in slots)
+
+    changed, unfixable = [], []
+    for m in mods:
+        if not m.get("enabled", True):
+            continue
+        tokens = re.findall(r"c\d{2}", (m.get("slot") or ""), re.I)
+        if not tokens or not is_added_slot(tokens[0]):
+            continue
+        char = m.get("character") or "Other"
+        used = taken.setdefault(char, set())
+        free = [s for s in assignable_slots() if s not in used]
+        rec = {"mod_id": m.get("mod_id"), "character": char,
+               "name": m.get("name", f"#{m.get('mod_id', '?')}"),
+               "from": tokens[0].lower()}
+        if not free:
+            unfixable.append(rec)
+            continue
+        m["slot"] = free[0]
+        used.add(free[0])
+        rec["to"] = free[0]
+        changed.append(rec)
+    return changed, unfixable
+
 # Map display fighter names → SSBU internal folder names (under fighter/)
 FIGHTER_INTERNAL = {
     "Banjo & Kazooie": "buddy", "Bayonetta": "bayonetta", "Bowser": "koopa",
@@ -11447,6 +11497,34 @@ class GameBananaBrowser:
                 slot = slot.lower()
                 slot_groups.setdefault((char, slot), []).append(m)
 
+        # ── Added-slot assignments (c08+) ──
+        # Left behind by the old slot picker.  These never worked: c08+
+        # doesn't exist in data.arc and this app doesn't generate the
+        # new-dir-infos declarations it would need (see VANILLA_SLOTS).
+        # Loading the profile moves them to a free c00..c07; flag here
+        # so Validate shows it before that happens.  The issue string
+        # must not read as a "same slot" / "cross-character" collision
+        # or _validate_profile will treat it as one.
+        for m in mods:
+            char = m.get("character") or "Other"
+            if char == "Other":
+                continue
+            tokens = re.findall(r'c\d{2}', (m.get("slot") or ""), re.I)
+            if not tokens or not is_added_slot(tokens[0]):
+                continue
+            internal = FIGHTER_INTERNAL.get(char, char.lower())
+            risks.append({
+                "severity": "freeze",
+                "fighter": internal,
+                "slot": tokens[0].lower(),
+                "issue": "added slot (c08+) not supported",
+                "detail": (f"{char} '{m.get('name', '?')}' is assigned to "
+                           f"{tokens[0].lower()}, which doesn't exist in "
+                           f"data.arc — it freezes at match load. Loading "
+                           f"this profile moves it to a free c00..c07."),
+                "mods": [m.get("name", f"#{m.get('mod_id', '?')}")],
+            })
+
         # ── Malformed multi-slot string warnings ──
         # These are profile entries like slot="c00, c03" which cause
         # collisions with every slot they list. Flag as freeze risk.
@@ -14610,6 +14688,43 @@ class GameBananaBrowser:
             except Exception as e:
                 print(f"    ! Cache clear failed: {e}")
 
+        # ── Added-slot guard ──
+        # The old slot picker handed out c08+ freely, so a saved profile
+        # can carry assignments that never worked (see VANILLA_SLOTS).
+        # Move those to a free c00..c07 now — replaying one verbatim
+        # would install a mod that freezes at match load.  The new slot
+        # is persisted: leaving the profile saying "c09" would make every
+        # later collision check reason about a layout that can't exist.
+        card_occ = {}
+        for m in downloadable:
+            char = m.get("character") or "Other"
+            fi = FIGHTER_INTERNAL.get(char)
+            if fi and char not in card_occ:
+                try:
+                    card_occ[char] = set(get_occupied_slots(fi))
+                except Exception:
+                    card_occ[char] = set()
+        moved, stuck = reassign_added_slots(downloadable, card_occ)
+        for r in moved:
+            print(f"  ↳ {r['character']} '{r['name']}': {r['from']} → "
+                  f"{r['to']}  (c08+ needs added-slot support this app "
+                  f"doesn't generate)")
+        for r in stuck:
+            print(f"  ✗ {r['character']} '{r['name']}': on {r['from']} and "
+                  f"c00..c07 are all taken — skipped, not installed.")
+        if moved:
+            try:
+                all_profiles = load_profiles()
+                new_slot_by_id = {str(r["mod_id"]): r["to"] for r in moved}
+                for m in all_profiles.get(profile_name, {}).get("mods", []):
+                    mid = str(m.get("mod_id"))
+                    if mid in new_slot_by_id:
+                        m["slot"] = new_slot_by_id[mid]
+                save_profiles(all_profiles)
+            except Exception as e:
+                print(f"  ! Could not persist reassigned slots: {e}")
+        stuck_ids = {str(r["mod_id"]) for r in stuck}
+
         # 2. Install only the new mods.
         success = 0
         failed = 0
@@ -14617,7 +14732,8 @@ class GameBananaBrowser:
         # auto-reslotting picks the same free slot every run.
         install_queue = [m for m in downloadable
                          if m.get("mod_id") is not None
-                         and str(m["mod_id"]) in to_install_ids]
+                         and str(m["mod_id"]) in to_install_ids
+                         and str(m["mod_id"]) not in stuck_ids]
 
         if not install_queue and not to_remove:
             print(f"  ✓ SD already matches profile — nothing to do.\n")
