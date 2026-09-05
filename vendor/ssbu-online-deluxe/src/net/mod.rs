@@ -70,7 +70,14 @@ unsafe fn online_melee_any_init(_: &InlineCtx) {
 unsafe fn online_bg_matchmaking_init(_: &InlineCtx) {
     LOCAL_ROOM_PANE_HANDLE.store(0, Ordering::SeqCst);
     ONLINE_ARENA_PANE_HANDLE.store(0, Ordering::SeqCst);
-    MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::Offline as u8, Ordering::SeqCst);
+    // Fork: Quickplay searches for an opponent *after* the character
+    // select screen, and this hook fires for that search.  Upstream
+    // resets the status to Offline here (it never supported Quickplay),
+    // which made the match start with the *offline* render profile —
+    // Vanilla — no matter what was selected.  Keep Quickplay as-is.
+    if !is_online_quickplay_mode() {
+        MATCH_CONNECTION_STATUS.store(MatchConnectionStatus::Offline as u8, Ordering::SeqCst);
+    }
     update_match_status(MatchStatus::Inactive, false);
 }
 

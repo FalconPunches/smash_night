@@ -18,13 +18,25 @@ external repo at build time.
 
 ## What changed vs. upstream
 
-Exactly two hunks, both in `src/net/mod.rs`, both marked with a `// Fork:`
-comment:
+Four hunks across two files, each marked with a `// Fork:` comment
+(`grep -rn "// Fork:" src` lists them all):
 
+`src/net/mod.rs`
 1. `online_melee_any_init` — always stores `MatchConnectionStatus::OnlineQuickPlay`
    instead of `Offline`-unless-Nextendo.
 2. `is_valid_online_mode()` — `|| is_online_quickplay_mode()` unconditionally,
    instead of `|| (is_online_nextendo_redirect_active() && is_online_quickplay_mode())`.
+3. `online_bg_matchmaking_init` — no longer resets the status to `Offline` when
+   already in Quickplay. Quickplay searches for an opponent *after* the
+   character select screen and this hook fires for that search; upstream's
+   reset is why the match started with the *offline* render profile (Vanilla)
+   regardless of the selection.
+
+`src/render/profile.rs`
+4. `match_init` — `in_real_online_match` is true in any valid online mode, not
+   only when the pia session already reports connected. Quickplay brings the
+   session up later than Arena does; upstream's `is_connected` gate sent it
+   down the offline branch.
 
 The `is_online_nextendo_redirect_active()` helper is left in place, unused.
 

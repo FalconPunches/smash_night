@@ -545,7 +545,14 @@ pub(crate) fn match_init() {
     let is_valid_online_mode = is_valid_online_mode();
     let is_connected = is_connected();
     let match_status = get_match_status();
-    let in_real_online_match = is_connected && match_status != MatchStatus::Training;
+    // Fork: in a valid online mode the *online* profile applies at match
+    // start regardless of whether the pia session reports connected at
+    // this exact instant — Quickplay brings the session up later than
+    // Arena does, and upstream's `is_connected` gate sent Quickplay down
+    // the offline branch (Vanilla).  Offline config is irrelevant once an
+    // online match starts.
+    let in_real_online_match =
+        (is_connected || is_valid_online_mode) && match_status != MatchStatus::Training;
 
     if in_real_online_match {
         if is_valid_online_mode {
