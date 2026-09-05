@@ -541,6 +541,17 @@ ONLINE_DELUXE_REPO_KEY = "online_deluxe"
 # .nro unchanged.
 ONLINE_DELUXE_QUICKPLAY_BUILD = os.path.join(
     SCRIPT_DIR, "smash_mods", "quickplay", ONLINE_DELUXE_NRO)
+
+
+def _same_file_bytes(a, b):
+    """True if two files are byte-identical (size check first)."""
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
 ONLINE_DELUXE_DEPS = [
     "libnro_hook.nro",
     "libsmashline_plugin.nro",
@@ -16205,6 +16216,19 @@ class GameBananaBrowser:
             else:
                 if gh:
                     detail = f"Missing (latest: {gh['version']})"
+
+            # Online Deluxe: when a Quickplay build is committed under
+            # smash_mods/quickplay/, that is the intended binary.  Provision
+            # only acts on rows that are not ok or warn, so a card still
+            # carrying upstream's .nro must be flagged or it never changes.
+            if (present and nro_name == ONLINE_DELUXE_NRO
+                    and os.path.isfile(ONLINE_DELUXE_QUICKPLAY_BUILD)):
+                if _same_file_bytes(nro_path, ONLINE_DELUXE_QUICKPLAY_BUILD):
+                    detail += "  · Quickplay build"
+                else:
+                    detail += ("  ⚠ Quickplay build available — Provision "
+                               "to install it")
+                    warn = True
 
             # ARCropolis refuses to run on any Smash version but the one it
             # was built for, and the check's dialog text is embedded in
