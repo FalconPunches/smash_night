@@ -1070,6 +1070,27 @@ SORT_OPTIONS = {
 
 RESULTS_PER_PAGE = 15
 MAX_SLOT = 16  # c00 through c15 — modded fighters can exceed vanilla 8
+# Scanning and assigning are different questions.  MAX_SLOT is how far
+# to LOOK when reading a card — a c08+ mod someone installed by hand
+# must still be seen and conflict-checked.  VANILLA_SLOTS is how far
+# this app may PUT things: c08+ don't exist in data.arc and only work
+# with the new-dir-infos / new-dir-infos-base / share-to-added
+# declarations that _regenerate_config_json does not generate.  Handing
+# one out silently produces a mod that freezes at match load.
+VANILLA_SLOTS = 8
+
+
+def is_added_slot(slot):
+    """True for c08+ — a slot that has to be *created*, not just filled."""
+    try:
+        return int(str(slot).lower().lstrip("c")) >= VANILLA_SLOTS
+    except ValueError:
+        return False
+
+
+def assignable_slots():
+    """The slots this app may assign a mod to: c00..c07."""
+    return [f"c{i:02d}" for i in range(VANILLA_SLOTS)]
 
 # Map display fighter names → SSBU internal folder names (under fighter/)
 FIGHTER_INTERNAL = {
@@ -1322,11 +1343,10 @@ def detect_file_conflicts(new_mod_path, exclude_mod_names=None):
 def find_free_body_slots(fighter_internal, count=1):
     """Return a list of up to *count* body-slot strings (e.g. ``['c10','c11']``)
     that are NOT occupied by any installed mod for *fighter_internal*.
-    Searches c00 → c15."""
+    Searches the assignable range c00 → c07 only (see VANILLA_SLOTS)."""
     occupied = get_occupied_slots(fighter_internal)
     free = []
-    for i in range(MAX_SLOT):
-        slot = f"c{i:02d}"
+    for slot in assignable_slots():
         if slot not in occupied:
             free.append(slot)
             if len(free) >= count:
@@ -4489,24 +4509,18 @@ def _regenerate_config_json(mod_path, slot_map):
         print(f"    Stripped {dropped} orphan config.json path(s) "
               "(referenced files not on disk)")
 
-    # Strip orphan share-to-vanilla / share-to-added entries the
-    # same way — paths whose source doesn't exist on disk get
-    # dropped from those redirect tables.
-    for tbl_name in ("share-to-vanilla", "share-to-added"):
-        tbl = config.get(tbl_name) or {}
-        if not isinstance(tbl, dict):
-            continue
-        cleaned = {}
-        for src, dests in tbl.items():
-            if not isinstance(dests, list):
-                continue
-            kept = [d for d in dests
-                    if isinstance(d, str)
-                    and os.path.isfile(os.path.join(
-                        mod_path, d.replace("/", os.sep)))]
-            if kept:
-                cleaned[src] = kept
-        config[tbl_name] = cleaned
+    # Do NOT apply the same orphan-stripping to share-to-vanilla /
+    # share-to-added.  That rule is right for new-dir-files (real mod
+    # files) and inverted for the share tables: per ARCropolis fs.rs,
+    # each key is a *source hash* resolved against the arc — never the
+    # mod's disk — and each destination is checked with
+    # ``context.contains_file``; if it is NOT already a file it goes
+    # through ``add_shared_file``.  A destination not existing is the
+    # designed case ("this path isn't shipped, alias it to the
+    # source"), so filtering on disk existence deleted every entry and
+    # left reslotted skins with no motion/camera/cmn/Metal fallbacks —
+    # the "one skin works, the rest freeze at match load" failure.
+    # The slot-token remap above is all these tables need.
 
     # Disk-walk: register every custom file under the appropriate
     # ``fighter/<f>/<slot>`` key. This matches CSharpM7's
@@ -7524,8 +7538,7 @@ def autoslot_missing_profile_entries(profile_name):
         taken = occupied_cache[fighter_internal] | used
 
         picked = None
-        for i in range(MAX_SLOT):
-            candidate = f"c{i:02d}"
+        for candidate in assignable_slots():
             if candidate not in taken:
                 picked = candidate
                 break
@@ -10129,9 +10142,15 @@ class GameBananaBrowser:
                             col_idx = i % 8
                             occ = occupied.get(target)
                             is_self = (target == s)
+                            # c08+ can be moved *out of* (a hand-installed
+                            # added-slot mod swapping down to c05 is fine)
+                            # but never *into* — see VANILLA_SLOTS.
+                            is_added = is_added_slot(target)
 
                             if is_self:
                                 bg, fg = T.PEACH, T.BG
+                            elif is_added:
+                                bg, fg = T.SURFACE, T.OVERLAY
                             elif occ:
                                 bg, fg = T.SURFACE1, T.OVERLAY
                             else:
@@ -10141,13 +10160,22 @@ class GameBananaBrowser:
                                 grid, text=target, width=4,
                                 bg=bg, fg=fg,
                                 font=(T.MONO, T.SZ_XS, "bold"),
-                                cursor="hand2" if not is_self else "",
+                                cursor="" if (is_self or is_added) else "hand2",
                                 relief="flat", padx=2, pady=2)
                             sbtn.grid(row=row_idx, column=col_idx,
                                       padx=1, pady=1)
 
                             if is_self:
                                 continue  # current slot — no action
+                            if is_added:
+                                sbtn.bind("<Enter>", lambda e, b=sbtn: (
+                                    self._show_tooltip(
+                                        b, "c08+ is an added slot — needs "
+                                           "new-dir-infos support this app "
+                                           "doesn't generate yet")))
+                                sbtn.bind("<Leave>",
+                                          lambda e: self._hide_tooltip())
+                                continue  # not assignable
 
                             # Click → swap
                             sbtn.bind(
@@ -11182,8 +11210,7 @@ class GameBananaBrowser:
             for dup in group_sorted[1:]:
                 taken = occupied_by_char.setdefault(char, set())
                 new_slot = None
-                for i in range(MAX_SLOT):
-                    cand = f"c{i:02d}"
+                for cand in assignable_slots():
                     if cand not in taken:
                         new_slot = cand
                         break
@@ -11247,8 +11274,7 @@ class GameBananaBrowser:
                 char = dup.get("character") or "Other"
                 taken = occupied_by_char.setdefault(char, set())
                 new_slot = None
-                for i in range(MAX_SLOT):
-                    cand = f"c{i:02d}"
+                for cand in assignable_slots():
                     if cand not in taken:
                         new_slot = cand
                         break
@@ -19902,7 +19928,8 @@ class GameBananaBrowser:
         legend = tk.Frame(grid_outer, bg=T.SURFACE)
         legend.pack(fill="x", pady=(0, 6))
         for color, label in [(T.GREEN, "Empty"), (T.SURFACE1, "Occupied"),
-                              (T.PEACH, "Assigned")]:
+                              (T.PEACH, "Assigned"),
+                              (T.OVERLAY, "c08+ unsupported")]:
             tk.Label(legend, text=" ● ", bg=T.SURFACE, fg=color,
                      font=(T.FONT, T.SZ_SM)).pack(side="left")
             tk.Label(legend, text=label, bg=T.SURFACE, fg=T.FG,
@@ -19938,16 +19965,29 @@ class GameBananaBrowser:
             row_idx = i // 8
             col_idx = i % 8
             is_occ = tgt_slot in occupied
+            is_added = is_added_slot(tgt_slot)
 
-            bg = T.SURFACE1 if is_occ else T.GREEN
-            fg = T.OVERLAY if is_occ else T.BG
+            if is_added:
+                bg, fg = T.SURFACE, T.OVERLAY
+            else:
+                bg = T.SURFACE1 if is_occ else T.GREEN
+                fg = T.OVERLAY if is_occ else T.BG
 
             btn = tk.Label(grid, text=tgt_slot, width=5, height=2,
                            bg=bg, fg=fg,
                            font=(T.MONO, T.SZ_XS, "bold"),
-                           cursor="hand2", relief="flat",
-                           padx=2, pady=2)
+                           cursor="" if is_added else "hand2",
+                           relief="flat", padx=2, pady=2)
             btn.grid(row=row_idx, column=col_idx, padx=2, pady=2)
+            if is_added:
+                # Shown so the user sees the slot exists, but not
+                # clickable and not registered in grid_btns — so
+                # _refresh_ui never repaints it green.  See VANILLA_SLOTS.
+                btn.bind("<Enter>", lambda e, b=btn: self._show_tooltip(
+                    b, "c08+ is an added slot — needs new-dir-infos "
+                       "support this app doesn't generate yet"))
+                btn.bind("<Leave>", lambda e: self._hide_tooltip())
+                continue
             btn.bind("<Button-1>", lambda e, t=tgt_slot: _click_target(t))
             grid_btns[tgt_slot] = btn
 
@@ -19972,8 +20012,8 @@ class GameBananaBrowser:
         def _auto_fill():
             """Assign all unassigned variants to the first available empty slots."""
             used = set(assignments.values())
-            empties = [f"c{i:02d}" for i in range(MAX_SLOT)
-                       if f"c{i:02d}" not in occupied and f"c{i:02d}" not in used]
+            empties = [s for s in assignable_slots()
+                       if s not in occupied and s not in used]
             for src in src_slots:
                 if src not in assignments and empties:
                     assignments[src] = empties.pop(0)
