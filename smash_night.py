@@ -17041,7 +17041,7 @@ class GameBananaBrowser:
             print(f"\n  Installing: {check['name']}…")
             ok = True
             if key == "skyline":
-                self._install_skyline()
+                ok = self._install_skyline()
             elif key == "oc_sysmodule":
                 ok = self._install_oc_sysmodule()
             # Dispatch on the plugin registry, not the local-cache table:
@@ -17205,18 +17205,35 @@ class GameBananaBrowser:
             dx_repo = GITHUB_REPOS[ONLINE_DELUXE_REPO_KEY][0]
             print(f"    Downloading pinned Skyline from {dx_repo}…")
             rel = github_latest_release(dx_repo)
-            got = []
+            # Stage both files and only commit once we have the pair: a
+            # half-written exefs is an unbootable game.
+            staged = {}
             for fn in ("main.npdm", "subsdk9"):
-                if extract_release_file(dx_repo, fn,
-                                        os.path.join(EXEFS_DIR, fn),
-                                        release=rel):
-                    got.append(fn)
+                tmp = os.path.join(tempfile.gettempdir(), f"sn_skyline_{fn}")
+                if extract_release_file(dx_repo, fn, tmp, release=rel):
+                    staged[fn] = tmp
+            if len(staged) == 2:
+                for fn, tmp in staged.items():
+                    shutil.move(tmp, os.path.join(EXEFS_DIR, fn))
                     print(f"    ✓ Installed: {fn}")
-            if len(got) == 2:
                 print(f"    Skyline (pinned by SSBU Online Deluxe) installed.")
-                return
-            print(f"    ⚠ Pinned Skyline not in the {dx_repo} release — "
-                  f"falling back to the latest upstream build.")
+                return True
+            for tmp in staged.values():
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            # Deliberately do NOT fall through to skyline-dev's latest.
+            # Upstream pins this build because the current release crashes
+            # with the mod, so installing it would trade a missing file
+            # for a game that boots into a crash.
+            print(f"    ✗ Pinned Skyline not found in the latest {dx_repo} "
+                  f"release{_github_rate_limit_note()}")
+            print(f"      Not installing skyline-dev's latest instead — "
+                  f"SSBU Online Deluxe crashes with it. Left the SD card "
+                  f"as-is; retry, or grab main.npdm + subsdk9 from the "
+                  f"mod's release zip by hand.")
+            return False
 
         repo, filt = GITHUB_REPOS["skyline"]
         print(f"    Downloading Skyline from GitHub…")
@@ -17234,8 +17251,9 @@ class GameBananaBrowser:
                         print(f"    ✓ Installed: {fn}")
             os.remove(tmp)
             print(f"    Skyline {info['version']} installed.")
-        else:
-            print(f"    ✗ Could not find Skyline release on GitHub{_github_rate_limit_note()}")
+            return True
+        print(f"    ✗ Could not find Skyline release on GitHub{_github_rate_limit_note()}")
+        return False
 
     def _update_atmosphere(self):
         """Download and deploy latest Atmosphere to SD card.
