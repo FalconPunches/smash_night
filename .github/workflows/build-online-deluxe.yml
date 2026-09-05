@@ -31,10 +31,23 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Not jugeeya/cargo-skyline:3.0.0-dkp-beta: its Cargo predates lockfile
+    # v4 and refuses upstream's Cargo.lock ("lock file version `4` was
+    # found").  ARCropolis dodges that by not committing a lockfile at
+    # all; we want the lockfile (it pins the exact 13.0.5 dependency
+    # commits), so use the current image HDR's smashline builds with —
+    # it produced smashline's 13.0.5 build on 2026-09-02.
     container:
-      image: jugeeya/cargo-skyline:3.0.0-dkp-beta
+      image: wuboyth/skyline-plugin-builder:latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: toolchain versions
+        run: |
+          export PATH=$PATH:/root/.cargo/bin:/opt/devkitpro/devkitA64/bin
+          cargo --version; rustc --version; cargo skyline --version || true
+        env:
+          HOME: /root
 
       - name: build
         working-directory: vendor/ssbu-online-deluxe
