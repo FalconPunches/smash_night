@@ -53,6 +53,15 @@ unsafe extern "C" fn setup_imgui_context(imgui_ctx: *mut u64) {
     igSetCurrentContext(imgui_ctx as _);
 }
 
+// Fork: the smallest delay-frame setting that covers this connection —
+// one-way latency (half the round trip) in 60 fps frames, rounded up.
+// Shown next to the ping as a starting point for the NetLatency row; go
+// one higher if the ping colour is yellow/red.  A reference only: the
+// game's own Auto pick is still shown as "Auto (Nf)" when Auto is selected.
+fn suggested_delay_frames(rtt_ms: u64) -> u64 {
+    ((rtt_ms as f64 / 2.0) / (1000.0 / 60.0)).ceil() as u64
+}
+
 fn format_ping_with_interface(rtt: Option<u64>, interface_type: NetworkInterfaceType) -> String {
     let interface_type_str = match interface_type {
         NetworkInterfaceType::Wifi => " [Wifi]",
@@ -61,7 +70,12 @@ fn format_ping_with_interface(rtt: Option<u64>, interface_type: NetworkInterface
         NetworkInterfaceType::Invalid => "",
     };
     match rtt {
-        Some(rtt) => format!("{}ms{}\0", rtt, interface_type_str),
+        Some(rtt) => format!(
+            "{}ms{} ~{}f\0",
+            rtt,
+            interface_type_str,
+            suggested_delay_frames(rtt)
+        ),
         None => format!("---{}\0", interface_type_str),
     }
 }

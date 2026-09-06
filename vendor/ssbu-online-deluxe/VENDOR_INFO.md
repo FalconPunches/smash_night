@@ -18,8 +18,8 @@ external repo at build time.
 
 ## What changed vs. upstream
 
-Seven `// Fork:` markers across three files (`grep -rn "// Fork:" src` lists
-them all), making five logical changes:
+Eight `// Fork:` markers across three files (`grep -rn "// Fork:" src` lists
+them all), making six logical changes:
 
 `src/net/mod.rs`
 1. `online_melee_any_init` — always stores `MatchConnectionStatus::OnlineQuickPlay`
@@ -51,6 +51,11 @@ them all), making five logical changes:
    or not the overlay is open), and the NetProfile cell appends " (server)"
    while the latch is set, so "Vanilla (server)" means "you asked for
    something else and the server pipeline overrode it".
+6. `suggested_delay_frames()` — the overlay's Ping cells append "~Nf": the
+   smallest delay-frame setting covering that connection (half the round
+   trip in 60 fps frames, rounded up). A starting point for the NetLatency
+   row; the game's own Auto pick is still shown as "Auto (Nf)" when Auto is
+   selected. Overlay only — the native CSS banner has fixed-width cells.
 
 The `is_online_nextendo_redirect_active()` helper is left in place, unused.
 

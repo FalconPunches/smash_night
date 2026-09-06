@@ -574,6 +574,188 @@ def oc_sysmodule_dir():
                         OC_SYSMODULE_TITLE_ID)
 
 
+# ── SSBU Online Deluxe config.toml ──
+# The mod reads an optional ``sd:/ultimate/ssbu_online_deluxe/config.toml``
+# at boot: which render profile to use in the menu and in *offline*
+# matches, which profiles "Auto" picks for online singles/doubles, and
+# whether to load its built-in overclocker.  Without the file everything
+# is upstream's default (Vanilla offline, LessLag / LessLagDoubles online,
+# overclocker on).  Each user profile carries its own copy of these
+# settings under ``deluxe_config`` and Provision writes the file to match,
+# so the offline profile is a dropdown rather than a hand-edited file.
+DELUXE_RENDER_PRESETS = ("Vanilla", "LessLag", "LessLagUltra",
+                         "LessLagDoubles")
+# Upstream's serde aliases for the same presets (and its "++" FPS-boost
+# suffix, which is emulator-only and meaningless on console).
+_DELUXE_PRESET_ALIASES = {"LLUltra": "LessLagUltra",
+                          "LLDoubles": "LessLagDoubles"}
+DELUXE_CONFIG_DEFAULTS = {
+    "offline_singles": "Vanilla",
+    "offline_doubles": "Vanilla",
+    "online_singles": "LessLag",
+    "online_doubles": "LessLagDoubles",
+    "overclocker": True,
+}
+# (key, label, help) — the order the profile dialogs show them in.
+DELUXE_CONFIG_FIELDS = (
+    ("offline_singles", "Offline singles",
+     "training / offline 1v1 — client-side, the server can't override it"),
+    ("offline_doubles", "Offline doubles",
+     "offline matches with more than two players"),
+    ("online_singles", "Online singles (Auto)",
+     "what Auto picks for online 1v1"),
+    ("online_doubles", "Online doubles (Auto)",
+     "what Auto picks for online doubles"),
+)
+_DELUXE_TOML_KEYS = {
+    "overclocker": "overclocker",
+    "render_profile_config.menu": "menu",
+    "render_profile_config.offline_match.singles": "offline_singles",
+    "render_profile_config.offline_match.doubles": "offline_doubles",
+    "render_profile_config.online_match.singles": "online_singles",
+    "render_profile_config.online_match.doubles": "online_doubles",
+}
+
+
+def deluxe_config_path():
+    """``<SD>/ultimate/ssbu_online_deluxe/config.toml`` for the active drive."""
+    return os.path.join(SD_CARD, "ultimate", "ssbu_online_deluxe",
+                        "config.toml")
+
+
+def normalize_deluxe_preset(value):
+    """Map any spelling upstream accepts onto one of DELUXE_RENDER_PRESETS,
+    or None if it isn't a preset.  ``Custom`` is not offered — it is what
+    the mod reports for settings that match no preset, not a choice."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip().rstrip("+").strip()
+    v = _DELUXE_PRESET_ALIASES.get(v, v)
+    for preset in DELUXE_RENDER_PRESETS:
+        if v.lower() == preset.lower():
+            return preset
+    return None
+
+
+def normalize_deluxe_config(raw):
+    """Apply defaults to a profile's ``deluxe_config`` dict (or None)."""
+    raw = raw if isinstance(raw, dict) else {}
+    cfg = {}
+    for key, default in DELUXE_CONFIG_DEFAULTS.items():
+        if key == "overclocker":
+            cfg[key] = bool(raw.get(key, default))
+        else:
+            cfg[key] = normalize_deluxe_preset(raw.get(key)) or default
+    return cfg
+
+
+def render_deluxe_config_toml(cfg):
+    """The config.toml text for a normalized deluxe config."""
+    cfg = normalize_deluxe_config(cfg)
+    oc = "true" if cfg["overclocker"] else "false"
+    return (
+        "# Written by Smash Night — edit the profile in the app instead.\n"
+        f"overclocker = {oc}\n"
+        "\n"
+        "[render_profile_config]\n"
+        "menu = \"Vanilla\"\n"
+        f"offline_match.singles = \"{cfg['offline_singles']}\"\n"
+        f"offline_match.doubles = \"{cfg['offline_doubles']}\"\n"
+        f"online_match.singles = \"{cfg['online_singles']}\"\n"
+        f"online_match.doubles = \"{cfg['online_doubles']}\"\n"
+    )
+
+
+_TOML_LINE_RE = re.compile(
+    r'^\s*([A-Za-z0-9_.\-]+)\s*=\s*("([^"]*)"|\'([^\']*)\'|true|false)')
+
+
+def parse_deluxe_config_toml(text):
+    """Pull the keys the mod reads out of a config.toml.
+
+    Deliberately tiny: this is the shape upstream documents and the shape
+    we write (bare or dotted keys, ``[table]`` / ``[table.sub]`` headers,
+    quoted strings, true/false).  Returns ``{our_key: value}`` for every
+    key it recognised — presets normalized, unknown presets kept as the
+    raw string so they show up as a difference — or None if the text has
+    a line it cannot make sense of, so a hand-written file we would
+    misread is reported rather than silently overwritten.
+    """
+    found = {}
+    table = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            end = line.find("]")
+            if end < 0:
+                return None
+            table = line[1:end].strip()
+            continue
+        m = _TOML_LINE_RE.match(line)
+        if not m:
+            return None
+        full_key = f"{table}.{m.group(1)}" if table else m.group(1)
+        ours = _DELUXE_TOML_KEYS.get(full_key)
+        if ours is None:
+            continue  # a key the mod doesn't read; irrelevant either way
+        val = m.group(2)
+        if val in ("true", "false"):
+            found[ours] = (val == "true")
+        else:
+            s = m.group(3) if m.group(3) is not None else m.group(4)
+            found[ours] = normalize_deluxe_preset(s) or s
+    return found
+
+
+def read_deluxe_config_from_card():
+    """``(exists, parsed)`` for the config.toml on the active SD."""
+    path = deluxe_config_path()
+    if not os.path.isfile(path):
+        return False, None
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as f:
+            return True, parse_deluxe_config_toml(f.read())
+    except OSError:
+        return True, None
+
+
+def deluxe_config_status(cfg):
+    """``(state, detail)`` comparing a profile's deluxe config to the card.
+
+    ``state`` is ``"match"``, ``"missing"`` (no file — mod runs on
+    upstream defaults) or ``"differs"``.
+    """
+    cfg = normalize_deluxe_config(cfg)
+    exists, parsed = read_deluxe_config_from_card()
+    if not exists:
+        if cfg == DELUXE_CONFIG_DEFAULTS:
+            return "missing", "No config.toml — mod is on its defaults"
+        return "missing", "No config.toml — written on Provision"
+    if parsed is None:
+        return "differs", "config.toml on card is not something this app " \
+                          "can read — rewritten on Provision"
+    diffs = []
+    want = dict(cfg)
+    want["menu"] = "Vanilla"
+    for key, expected in want.items():
+        have = parsed.get(key, DELUXE_CONFIG_DEFAULTS.get(key, "Vanilla"))
+        if have != expected:
+            label = key.replace("_", " ")
+            if isinstance(expected, bool):
+                diffs.append(f"{label} {'on' if expected else 'off'} "
+                             f"(card: {'on' if have else 'off'})")
+            else:
+                diffs.append(f"{label} {expected} (card: {have})")
+    if diffs:
+        return "differs", "Card differs — " + "; ".join(diffs)
+    parts = [f"offline {cfg['offline_singles']}/{cfg['offline_doubles']}",
+             f"online Auto {cfg['online_singles']}/{cfg['online_doubles']}",
+             "overclocker " + ("on" if cfg["overclocker"] else "off")]
+    return "match", "Installed  (" + ", ".join(parts) + ")"
+
+
 # Local copies of plugin .nro files (bundled with this repo)
 LOCAL_PLUGINS = {
     "libarcropolis.nro": os.path.join(SCRIPT_DIR, "switch_setup", "mods", "arcropolis",
@@ -7481,6 +7663,9 @@ def profile_config(profile):
         # after a Smash update, the release is the thing that's broken.
         # Needs a GitHub token; falls back to the release without one.
         "nightly_arcropolis": bool(profile.get("nightly_arcropolis", True)),
+        # SSBU Online Deluxe's config.toml, written to the card on
+        # Provision.  Missing/partial → upstream's defaults.
+        "deluxe_config": normalize_deluxe_config(profile.get("deluxe_config")),
         "plugins": effective_plugins,
     }
 
@@ -8274,6 +8459,45 @@ class TextRedirector:
 # ═══════════════════════════════════════════════════════════
 #  MAIN GUI
 # ═══════════════════════════════════════════════════════════
+
+def _attach_tooltip(widget, text, delay_ms=500):
+    """Hover tooltip for a Tk widget (no external dependency)."""
+    state = {"win": None, "after": None}
+
+    def _show():
+        if state["win"] is not None:
+            return
+        try:
+            x = widget.winfo_rootx() + 12
+            y = widget.winfo_rooty() + widget.winfo_height() + 4
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{x}+{y}")
+            tk.Label(tip, text=text, bg=T.CRUST, fg=T.FG, justify="left",
+                     wraplength=320, relief="solid", bd=1,
+                     font=(T.FONT, T.SZ_XS), padx=6, pady=3).pack()
+            state["win"] = tip
+        except tk.TclError:
+            state["win"] = None
+
+    def _enter(_e=None):
+        state["after"] = widget.after(delay_ms, _show)
+
+    def _leave(_e=None):
+        if state["after"] is not None:
+            widget.after_cancel(state["after"])
+            state["after"] = None
+        if state["win"] is not None:
+            try:
+                state["win"].destroy()
+            except tk.TclError:
+                pass
+            state["win"] = None
+
+    widget.bind("<Enter>", _enter, add="+")
+    widget.bind("<Leave>", _leave, add="+")
+    widget.bind("<ButtonPress>", _leave, add="+")
+
 
 class GameBananaBrowser:
     def __init__(self, root: tk.Tk):
@@ -10562,7 +10786,7 @@ class GameBananaBrowser:
         win.configure(bg=T.SURFACE)
         win.transient(self.root)
         win.grab_set()
-        win.geometry("520x540")
+        win.geometry("520x720")
 
         body = tk.Frame(win, bg=T.SURFACE)
         body.pack(fill="both", expand=True, padx=14, pady=12)
@@ -10642,6 +10866,10 @@ class GameBananaBrowser:
                          font=(T.FONT, T.SZ_XS)).pack(side="left",
                                                        padx=(6, 0))
 
+        # SSBU Online Deluxe's config.toml, per profile (see the Manage
+        # Profiles dialog for the same block).
+        deluxe_vars = self._build_deluxe_config_widgets(body, row=7)
+
         # Snapshot toggle: default OFF so a freshly-created profile starts
         # empty. The previous default copied whatever was on the SD, which
         # surprised users who expected "new profile" to mean "blank slate".
@@ -10654,14 +10882,14 @@ class GameBananaBrowser:
                 selectcolor=T.CRUST, activebackground=T.SURFACE,
                 activeforeground=T.ACCENT,
                 font=(T.FONT, T.SZ_SM)).grid(
-                    row=6, column=0, columnspan=2, sticky="w",
+                    row=8, column=0, columnspan=2, sticky="w",
                     pady=(10, 2))
         else:
             tk.Label(body,
                      text="(no SD mods to snapshot — profile starts empty)",
                      bg=T.SURFACE, fg=T.OVERLAY,
                      font=(T.FONT, T.SZ_XS)).grid(
-                         row=6, column=0, columnspan=2, sticky="w",
+                         row=8, column=0, columnspan=2, sticky="w",
                          pady=(10, 2))
 
         body.columnconfigure(1, weight=1)
@@ -10713,6 +10941,7 @@ class GameBananaBrowser:
                 "wifi_safe": bool(wifi_var.get()),
                 "unofficial_atmo": bool(atmo_var.get()),
                 "nightly_arcropolis": bool(nightly_var.get()),
+                "deluxe_config": self._deluxe_cfg_from_vars(deluxe_vars),
                 "plugins": [nro for nro, v in plugin_vars.items()
                             if v.get()],
             }
@@ -16183,6 +16412,24 @@ class GameBananaBrowser:
                 "section": "profile",
             })
 
+        # 3c. Online Deluxe config.toml — render profiles for menu /
+        # offline / online-Auto and the overclocker switch, per profile.
+        if deluxe_active:
+            dcfg = self._active_deluxe_config()
+            state, detail = deluxe_config_status(dcfg)
+            # No file + default settings is fine (yellow "Update" so it
+            # gets written once); no file + a real choice is a miss.
+            checks.append({
+                "name": "Online Deluxe config",
+                "desc": "Offline / online render profiles, overclocker",
+                "ok": not (state == "missing"
+                           and dcfg != DELUXE_CONFIG_DEFAULTS),
+                "warn": state != "match",
+                "detail": detail,
+                "fixable": True, "fix_key": "deluxe_config",
+                "section": "profile",
+            })
+
         # 4-6. Plugins — only check core + active profile plugins
         plugin_repo_map = _NRO_TO_REPO
         profile = PROVISIONING_PROFILES.get(self._active_profile, {})
@@ -16453,6 +16700,8 @@ class GameBananaBrowser:
             self._install_skyline()
         elif key == "oc_sysmodule":
             self._install_oc_sysmodule()
+        elif key == "deluxe_config":
+            self._write_deluxe_config()
         # Dispatch on the plugin registry, not the local-cache table:
         # the Online Deluxe chain has no copy bundled in this repo.
         elif key in KNOWN_PLUGINS:
@@ -16494,7 +16743,7 @@ class GameBananaBrowser:
         win = tk.Toplevel(self.root)
         win.title("Manage Profiles")
         win.configure(bg=T.SURFACE)
-        win.geometry("640x560")
+        win.geometry("640x700")
         win.transient(self.root)
 
         tk.Label(win, text="Manage Profiles",
@@ -16597,17 +16846,21 @@ class GameBananaBrowser:
         # Live "card matches profile?" banner — recomputed whenever the
         # selection or any toggle changes so the user can see at a
         # glance whether Provision Card would actually do anything.
+        # SSBU Online Deluxe's config.toml (offline / online-Auto render
+        # profiles, overclocker) — per profile, written on Provision.
+        deluxe_vars = self._build_deluxe_config_widgets(edit_frame, row=5)
+
         status_label = tk.Label(edit_frame, text="", bg=T.SURFACE,
                                 fg=T.OVERLAY, justify="left",
                                 wraplength=360,
                                 font=(T.FONT, T.SZ_SM, "bold"))
-        status_label.grid(row=5, column=0, columnspan=2, sticky="w",
+        status_label.grid(row=6, column=0, columnspan=2, sticky="w",
                           pady=(10, 2))
 
         info_label = tk.Label(edit_frame, text="", bg=T.SURFACE,
                               fg=T.OVERLAY, justify="left", wraplength=360,
                               font=(T.FONT, T.SZ_XS))
-        info_label.grid(row=6, column=0, columnspan=2, sticky="w",
+        info_label.grid(row=7, column=0, columnspan=2, sticky="w",
                         pady=(2, 0))
         edit_frame.grid_columnconfigure(1, weight=1)
 
@@ -16620,6 +16873,7 @@ class GameBananaBrowser:
                 "wifi_safe": bool(wifi_var.get()),
                 "unofficial_atmo": bool(atmo_var.get()),
                 "nightly_arcropolis": bool(nightly_var.get()),
+                "deluxe_config": self._deluxe_cfg_from_vars(deluxe_vars),
                 "plugins": [nro for nro, v in plugin_vars.items()
                             if v.get()],
             }
@@ -16633,6 +16887,8 @@ class GameBananaBrowser:
         atmo_var.trace_add("write", _refresh_status)
         nightly_var.trace_add("write", _refresh_status)
         for v in plugin_vars.values():
+            v.trace_add("write", _refresh_status)
+        for v in deluxe_vars.values():
             v.trace_add("write", _refresh_status)
 
         def _load_selected(_event=None):
@@ -16650,6 +16906,7 @@ class GameBananaBrowser:
                 wifi_var.set(cfg["wifi_safe"])
                 atmo_var.set(cfg["unofficial_atmo"])
                 nightly_var.set(cfg["nightly_arcropolis"])
+                self._set_deluxe_vars(deluxe_vars, cfg["deluxe_config"])
                 sel_plugins = set(cfg["plugins"])
                 for nro, v in plugin_vars.items():
                     v.set(nro in sel_plugins)
@@ -16706,6 +16963,7 @@ class GameBananaBrowser:
             data["wifi_safe"] = bool(wifi_var.get())
             data["unofficial_atmo"] = bool(atmo_var.get())
             data["nightly_arcropolis"] = bool(nightly_var.get())
+            data["deluxe_config"] = self._deluxe_cfg_from_vars(deluxe_vars)
             data["plugins"] = [nro for nro, v in plugin_vars.items()
                                if v.get()]
             profiles[new_name] = data
@@ -16738,6 +16996,7 @@ class GameBananaBrowser:
                 "wifi_safe": True,
                 "unofficial_atmo": True,
                 "nightly_arcropolis": True,
+                "deluxe_config": dict(DELUXE_CONFIG_DEFAULTS),
                 "plugins": all_plugins,
             }
             save_profiles(profiles)
@@ -16878,6 +17137,8 @@ class GameBananaBrowser:
         nightly_var.trace_add("write", _refresh_provision_button)
         for v in plugin_vars.values():
             v.trace_add("write", _refresh_provision_button)
+        for v in deluxe_vars.values():
+            v.trace_add("write", _refresh_provision_button)
 
         # Auto-persist toggle changes — Save button was confusing UX so
         # the dialog now writes through every flag flip immediately.
@@ -16892,6 +17153,8 @@ class GameBananaBrowser:
         atmo_var.trace_add("write", _autosave)
         nightly_var.trace_add("write", _autosave)
         for v in plugin_vars.values():
+            v.trace_add("write", _autosave)
+        for v in deluxe_vars.values():
             v.trace_add("write", _autosave)
         name_entry.bind("<FocusOut>", lambda _e: _autosave())
         name_entry.bind("<Return>", lambda _e: _autosave())
@@ -16916,6 +17179,67 @@ class GameBananaBrowser:
                 self._active_profile, {}).get("plugins", []))
         return profile_config(prof)["plugins"]
 
+    def _build_deluxe_config_widgets(self, parent, row):
+        """Grid the SSBU Online Deluxe config block into ``parent`` at
+        ``row`` (columns 0-1) and return ``{key: tk.Variable}``.
+
+        Shared by the Create Profile and Manage Profiles dialogs so both
+        offer the same fields.  Read back with _deluxe_cfg_from_vars().
+        """
+        box = tk.LabelFrame(
+            parent, text=" SSBU Online Deluxe render profiles ",
+            bg=T.SURFACE, fg=T.PEACH, bd=1, relief="groove",
+            font=(T.FONT, T.SZ_XS, "bold"))
+        box.grid(row=row, column=0, columnspan=2, sticky="we",
+                 pady=(8, 2))
+        tk.Label(box,
+                 text="Written to the card's config.toml on Provision.  "
+                 "Online: Nintendo's servers force Vanilla in Quickplay "
+                 "(shown as \"Vanilla (server)\"); Arena / Local keep your "
+                 "pick.",
+                 bg=T.SURFACE, fg=T.OVERLAY, justify="left",
+                 wraplength=340, font=(T.FONT, T.SZ_XS)).grid(
+                     row=0, column=0, columnspan=4, sticky="w",
+                     padx=6, pady=(2, 4))
+        variables = {}
+        for i, (key, label, help_text) in enumerate(DELUXE_CONFIG_FIELDS):
+            r, c = 1 + i // 2, (i % 2) * 2
+            tk.Label(box, text=label + ":", bg=T.SURFACE, fg=T.FG,
+                     font=(T.FONT, T.SZ_XS)).grid(
+                         row=r, column=c, sticky="w", padx=(6, 2),
+                         pady=1)
+            var = tk.StringVar(value=DELUXE_CONFIG_DEFAULTS[key])
+            combo = ttk.Combobox(box, textvariable=var, width=14,
+                                 state="readonly",
+                                 values=list(DELUXE_RENDER_PRESETS),
+                                 font=(T.FONT, T.SZ_XS))
+            combo.grid(row=r, column=c + 1, sticky="w", padx=(0, 8),
+                       pady=1)
+            _attach_tooltip(combo, help_text)
+            variables[key] = var
+        oc_var = tk.BooleanVar(value=DELUXE_CONFIG_DEFAULTS["overclocker"])
+        tk.Checkbutton(
+            box, text="Built-in overclocker (turn off only if you run "
+            "your own OC sysmodule)",
+            variable=oc_var, bg=T.SURFACE, fg=T.FG, selectcolor=T.CRUST,
+            activebackground=T.SURFACE, activeforeground=T.FG,
+            font=(T.FONT, T.SZ_XS)).grid(
+                row=3, column=0, columnspan=4, sticky="w", padx=4,
+                pady=(4, 4))
+        variables["overclocker"] = oc_var
+        return variables
+
+    @staticmethod
+    def _deluxe_cfg_from_vars(variables):
+        return normalize_deluxe_config(
+            {k: v.get() for k, v in variables.items()})
+
+    @staticmethod
+    def _set_deluxe_vars(variables, cfg):
+        cfg = normalize_deluxe_config(cfg)
+        for k, v in variables.items():
+            v.set(cfg[k])
+
     def _profile_provision_status(self, cfg):
         """Return ``(state, msg, color)`` describing whether the SD card
         currently matches the supplied profile config.
@@ -16938,7 +17262,18 @@ class GameBananaBrowser:
                    if os.path.exists(os.path.join(PLUGINS_DIR, nro))}
         missing = expected - present
         extra = (present & set(non_core)) - expected
-        if not missing and not extra:
+        # The Online Deluxe config.toml is part of "provisioned for this
+        # profile" too — a card carrying the right plugins but another
+        # profile's offline render profile is still drift.
+        config_diff = None
+        if ONLINE_DELUXE_NRO in expected and "deluxe_config" in cfg:
+            state, detail = deluxe_config_status(cfg["deluxe_config"])
+            if state == "differs" or (
+                    state == "missing" and normalize_deluxe_config(
+                        cfg["deluxe_config"]) != DELUXE_CONFIG_DEFAULTS):
+                config_diff = "Online Deluxe config not on card" \
+                    if state == "missing" else "Online Deluxe " + detail
+        if not missing and not extra and not config_diff:
             return "match", "✅ Card is provisioned for this profile", T.GREEN
         parts = []
         if missing:
@@ -16949,6 +17284,8 @@ class GameBananaBrowser:
             names = ", ".join(KNOWN_PLUGINS.get(n, {}).get("name", n)
                               for n in sorted(extra))
             parts.append(f"unexpected: {names}")
+        if config_diff:
+            parts.append(config_diff)
         return "drift", "⚠ Card differs — " + "; ".join(parts), T.YELLOW
 
     def _provision_profile(self, profile_name):
@@ -17451,6 +17788,8 @@ class GameBananaBrowser:
                 ok = self._install_skyline()
             elif key == "oc_sysmodule":
                 ok = self._install_oc_sysmodule()
+            elif key == "deluxe_config":
+                ok = self._write_deluxe_config()
             # Dispatch on the plugin registry, not the local-cache table:
             # the Online Deluxe chain has no copy bundled in this repo.
             elif key in KNOWN_PLUGINS:
@@ -17610,6 +17949,34 @@ class GameBananaBrowser:
 
         print(f"    ✗ No source available for {nro_name}")
         return False
+
+    def _active_deluxe_config(self):
+        """The active user profile's SSBU Online Deluxe config (defaults
+        when no user profile is selected)."""
+        prof = load_profiles().get(self._active_user_profile or "")
+        if prof is None:
+            return dict(DELUXE_CONFIG_DEFAULTS)
+        return profile_config(prof)["deluxe_config"]
+
+    def _write_deluxe_config(self, cfg=None):
+        """Write SSBU Online Deluxe's config.toml to the card for the
+        active profile.  Returns True on success."""
+        cfg = normalize_deluxe_config(
+            cfg if cfg is not None else self._active_deluxe_config())
+        path = deluxe_config_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(render_deluxe_config_toml(cfg))
+        except OSError as e:
+            print(f"    ✗ Could not write {path}: {e}")
+            return False
+        print(f"    ✓ Wrote {path}")
+        print(f"      offline {cfg['offline_singles']} / "
+              f"{cfg['offline_doubles']}, online Auto "
+              f"{cfg['online_singles']} / {cfg['online_doubles']}, "
+              f"overclocker {'on' if cfg['overclocker'] else 'off'}")
+        return True
 
     def _install_oc_sysmodule(self):
         """Install the boot2 overclock sysmodule SSBU Online Deluxe uses.
