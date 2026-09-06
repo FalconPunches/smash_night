@@ -356,10 +356,15 @@ unsafe fn draw_interact_table(first_col_width: f32) {
             true => RenderProfileManager::active_render_profile(),
             false => RenderProfileManager::instance().selected_render_profile(),
         };
-        let rp_str = match RenderProfileManager::instance().is_auto_mode() {
+        let mut rp_str = match RenderProfileManager::instance().is_auto_mode() {
             true => format!("Auto({})", rp),
             false => rp.to_string(),
         };
+        // Fork: Nintendo's servers had ssbusync revert the pipeline to
+        // vanilla; say so instead of showing a bare "Vanilla".
+        if crate::render::profile::pipeline_enforced_vanilla() {
+            rp_str.push_str(" (server)");
+        }
         let rp_disp = as_imgui_text(rp_str);
         draw_text_cell(&rp_disp);
     } else {
@@ -571,6 +576,9 @@ unsafe fn draw_debug_table(first_col_width: f32) {
 
 unsafe extern "C" fn draw() {
     OVERLAY_POLLER.poll();
+    // Fork: once per match, restore vanilla resolution if ssbusync forced
+    // the pipeline back to vanilla (see render::profile).
+    crate::render::profile::reconcile_enforced_vanilla();
     let input_snapshot = OVERLAY_POLLER.snapshot();
     let toggle_window_buttons = check_overlay_toggle_buttons_pressed(&input_snapshot);
 

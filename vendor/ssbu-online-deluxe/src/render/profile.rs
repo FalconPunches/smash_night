@@ -545,6 +545,7 @@ pub(crate) fn match_init() {
     let is_valid_online_mode = is_valid_online_mode();
     let is_connected = is_connected();
     let match_status = get_match_status();
+    ENFORCED_VANILLA.store(false, Ordering::SeqCst);
     // Fork: in a valid online mode the *online* profile applies at match
     // start regardless of whether the pia session reports connected at
     // this exact instant — Quickplay brings the session up later than
@@ -574,7 +575,46 @@ pub(crate) fn match_init() {
     }
 }
 
+// Fork: on Nintendo's servers ssbusync (closed source) reverts the frame
+// pipeline — buffering, frame index, vsync, render-opts — to vanilla at
+// match start, but leaves the resolution we set alone.  That produced the
+// worst of both: LessLagUltra's 576p (or LessLag's dynamic res) with none
+// of the latency benefit, under a label that read "Vanilla".  Once per
+// match, if the pipeline reads vanilla while a non-vanilla profile was
+// requested, restore vanilla resolution too — so the state, and therefore
+// the label, is honestly Vanilla.  Never touches Arena/Local, where the
+// pipeline change sticks and this check never fires.
+static ENFORCED_VANILLA: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn pipeline_enforced_vanilla() -> bool {
+    ENFORCED_VANILLA.load(Ordering::SeqCst)
+}
+
+pub(crate) fn reconcile_enforced_vanilla() {
+    if ENFORCED_VANILLA.load(Ordering::SeqCst) || !crate::net::is_in_valid_online_game() {
+        return;
+    }
+    let selected = RenderProfileManager::instance().selected_render_profile();
+    if selected.preset == RenderProfilePreset::Vanilla {
+        return;
+    }
+    let active = RenderProfileManager::active_render_profile_settings();
+    let pipeline_is_vanilla = active.buffer_mode == BufferMode::Triple
+        && active.index_mode == IndexMode::TwoBehind
+        && active.vsync_enabled
+        && !active.render_opts_enabled;
+    if !pipeline_is_vanilla {
+        return;
+    }
+    let vanilla = RenderProfileSettings::vanilla();
+    let _ = sync_guest::set_default_game_resolution_level(vanilla.default_resolution_level);
+    let _ = sync_guest::set_dynamic_resolution_enabled(vanilla.dynamic_res_enabled);
+    ENFORCED_VANILLA.store(true, Ordering::SeqCst);
+    println!("[FORK] ssbusync enforced a vanilla pipeline; restored vanilla resolution too");
+}
+
 pub(crate) fn match_cleanup() {
+    ENFORCED_VANILLA.store(false, Ordering::SeqCst);
     let rc = RENDER_CONFIG.load();
     let menu_rp = rc.render_profile_config.menu;
     RenderProfileManager::apply_render_profile_settings_immediate(

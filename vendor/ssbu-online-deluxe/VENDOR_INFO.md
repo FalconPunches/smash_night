@@ -18,8 +18,8 @@ external repo at build time.
 
 ## What changed vs. upstream
 
-Four hunks across two files, each marked with a `// Fork:` comment
-(`grep -rn "// Fork:" src` lists them all):
+Seven `// Fork:` markers across three files (`grep -rn "// Fork:" src` lists
+them all), making five logical changes:
 
 `src/net/mod.rs`
 1. `online_melee_any_init` — always stores `MatchConnectionStatus::OnlineQuickPlay`
@@ -37,6 +37,20 @@ Four hunks across two files, each marked with a `// Fork:` comment
    only when the pia session already reports connected. Quickplay brings the
    session up later than Arena does; upstream's `is_connected` gate sent it
    down the offline branch.
+5. `reconcile_enforced_vanilla()` / `pipeline_enforced_vanilla()` (new, plus a
+   latch reset in `match_init` / `match_cleanup`) — on Nintendo's servers
+   the closed-source ssbusync reverts the frame pipeline (buffering, index,
+   vsync, render-opts) to vanilla at match start but leaves the resolution
+   the selected profile set. Once per match, if the pipeline reads vanilla
+   while a non-vanilla profile was selected, restore vanilla resolution too
+   and latch a flag. Only ever restores vanilla; never fires in Arena/Local
+   where the pipeline change sticks.
+
+`src/ui/overlay/mod.rs`
+   `draw()` calls `reconcile_enforced_vanilla()` every frame (it runs whether
+   or not the overlay is open), and the NetProfile cell appends " (server)"
+   while the latch is set, so "Vanilla (server)" means "you asked for
+   something else and the server pipeline overrode it".
 
 The `is_online_nextendo_redirect_active()` helper is left in place, unused.
 
@@ -53,7 +67,7 @@ commits), `build.rs`.
 
 1. Clone upstream at the new tag.
 2. Copy its tree over this directory (keeping this file), then re-apply the
-   two hunks above — they are small and the surrounding code rarely moves.
+   changes above — they are small and the surrounding code rarely moves.
 3. Update the table at the top, push. The workflow builds on any change
    under `vendor/ssbu-online-deluxe/`.
 
